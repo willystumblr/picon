@@ -217,8 +217,6 @@ class InterrogationEnv:
             "history": [obj.model_dump() for obj in self.state.history]
         }
         
-        if os.path.dirname(path) and not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
         write_json(final_result, path)
 
 

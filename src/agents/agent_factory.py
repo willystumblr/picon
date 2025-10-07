@@ -29,6 +29,6 @@ def get_agent(
         return QuestionerAgent(role="questioner", system_message=open(system_message_path).read())
     elif agent_type == "web_search":
         from src.agents.web_search_agent import WebSearchAgent
-        return WebSearchAgent(role="web_search", system_message=open(system_message_path).read(), tools=kwargs.get('tools', []))
+        return WebSearchAgent(role="web_search", system_message=open(system_message_path).read())
     else:
         raise ValueError(f"Unsupported agent type: {agent_type}")

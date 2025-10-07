@@ -16,9 +16,9 @@ from concurrent.futures import ThreadPoolExecutor
 class InterrogationEnv:
     def __init__(
         self, 
-        agents: List[Agent] | Dict[str, Agent] = [],
+        agents: Dict[str, Agent] = {},
         baseline_name: str = "characterai",
-        tools: Dict[str, Any] = {},
+        tools: List[Dict[str, Any]] = [],
         max_turns: int = 20,
         question_path: str = "src/env/wvs_orthogonal_questions.json",
         instruction_path: str = "src/env/interrogation_instruct.txt",
@@ -26,14 +26,20 @@ class InterrogationEnv:
         ):
         self.tools = tools
         if not agents:
+            logging.warning("No agents provided. Initializing default agents.")
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(current_dir))
             agents = {
                 "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt"),
-                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/extractor_prompt_v2.txt"),
-                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", tools=[tool.get_info() for tool in self.tools.values()])
+                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt"),
+                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt")
             }
         self.agents = agents
+        if 'web_search' in self.agents and not self.tools:
+            logging.warning("No tools provided for web search agent.")
+        if 'web_search' in self.agents and not self.agents['web_search'].tools:
+            logging.info("Setting web search agent tools from environment.")
+            self.agents['web_search'].tools = [tool.get_info() for tool in self.tools.values()]
         
         self.interviewee = IntervieweeSimulator(
             baseline_name=baseline_name,
@@ -214,11 +220,12 @@ class InterrogationEnv:
                 "baseline": self.interviewee.type,
             },
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
-            "history": [obj.model_dump() for obj in self.state.history]
+            "history": [obj.model_dump() for obj in self.state.history],
+            "agent_memory": {
+                agent_name: agent.memory for agent_name, agent in self.agents.items()
+            }
         }
         
-        if os.path.dirname(path) and not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
         write_json(final_result, path)
 
 

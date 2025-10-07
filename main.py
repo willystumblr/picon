@@ -1,6 +1,7 @@
 import os
 from src.utils import setup_logging, read_json, write_json
 from src.env.interrogation_env import InterrogationEnv
+from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
 from dotenv import load_dotenv
@@ -19,6 +20,10 @@ def parse_args():
     parser.add_argument('--sample', action='store_true', help='Whether to sample OpenCharacter personas.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for sampling personas.')
     parser.add_argument('--log_to_file', action='store_true', help='Whether to log to a file.')
+    parser.add_argument('--questioner_prompt_path', type=str, default='src/agents/prompts/examiner_prompt_2.txt', help='Path to the questioner agent prompt file.')
+    parser.add_argument('--entity_extractor_prompt_path', type=str, default='src/agents/prompts/entity_extractor.txt', help='Path to the entity extractor agent prompt file.')
+    parser.add_argument('--claim_extractor_prompt_path', type=str, default='src/agents/prompts/claim_extractor_prompt.txt', help='Path to the claim extractor agent prompt file.')
+    parser.add_argument('--web_search_prompt_path', type=str, default='src/agents/prompts/websearch_prompt.txt', help='Path to the web search agent prompt file.')
     parser.add_argument('--use_claim_extractor', action='store_true', help='Whether to use the claim extractor agent instead of the entity extractor agent.')
     
     return parser.parse_args()
@@ -39,13 +44,12 @@ if __name__ == "__main__":
                 "character_id": persona['character_id'],
                 "user_id": os.getenv('CAI_API_KEY'), #args.user_id,
                 "name": persona['character_name'],
-                "use_claim_extractor": args.use_claim_extractor
+                
             })    
     elif args.baseline_name == "human_simulacra":
         interviewee_kwargs = [{
             "baseline_name": "human_simulacra",
-            "name": name,
-            "use_claim_extractor": args.use_claim_extractor
+            "name": name,            
         } for name in ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami Clark", "Michael Miller", "Kevin Kelly", "Erica Walker", "Leslie Nichols", "Robert Scott", "Marsh Zhaleh"]]
     elif args.baseline_name == "opencharacter":
         dataset = load_dataset("xywang1/OpenCharacter", "Synthetic-Character", split="train")
@@ -62,14 +66,12 @@ if __name__ == "__main__":
                 "persona": data['persona'],
                 "profile": data['character'],
                 "name": name_match.group(1).strip(),
-                "load_in_4bit": True,
-                "use_claim_extractor": args.use_claim_extractor
+                "load_in_4bit": True,                
             })
     elif args.baseline_name == "human_interview":
         interviewee_kwargs = [{
             "baseline_name": "human_interview",
-            "name": input("Enter your name: "),
-            "use_claim_extractor": args.use_claim_extractor
+            "name": input("Enter your name: "),            
         }]
     else:
         raise ValueError("Invalid baseline name. Choose from ['characterai', 'human_simulacra', 'opencharacter', 'human_interview']")
@@ -77,14 +79,20 @@ if __name__ == "__main__":
     for interviewee_kwarg in interviewee_kwargs:
         try:
             logging.info(f"Starting new session with interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}")
+            tools = {
+                "google_claim_search": GoogleClaimSearch(
+                    api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
+                    cx=os.getenv('GOOGLE_CX_ID'),
+                ),
+                "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
+            }
             env = InterrogationEnv(
-                tools={
-                    "google_claim_search": GoogleClaimSearch(
-                        api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
-                        cx=os.getenv('GOOGLE_CX_ID'),
-                    ),
-                    "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
+                agents = {
+                    "questioner": get_agent("questioner", args.questioner_prompt_path),
+                    "extractor": get_agent("claim_extractor", args.claim_extractor_prompt_path) if args.use_claim_extractor else get_agent("entity_extractor", args.entity_extractor_prompt_path),
+                    "web_search": get_agent("web_search", args.web_search_prompt_path)
                 },
+                tools=tools,
                 max_turns=args.num_turns,
                 **interviewee_kwarg
             )

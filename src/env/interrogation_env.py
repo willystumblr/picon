@@ -211,7 +211,7 @@ class InterrogationEnv:
         return self.state
         
     
-    def save_state(self, path: str):
+    def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result={
             "agents_info":{agent_name: agent.model for agent_name, agent in self.agents.items()},
@@ -220,6 +220,7 @@ class InterrogationEnv:
                 "baseline": self.interviewee.type,
             },
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
+            "termination_status": termination_status,
             "history": [obj.model_dump() for obj in self.state.history],
             "agent_memory": {
                 agent_name: agent.memory for agent_name, agent in self.agents.items()

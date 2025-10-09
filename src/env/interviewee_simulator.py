@@ -75,8 +75,18 @@ class IntervieweeSimulator:
             self.name = re.search(r'^Name:\s*(.+)$', kwargs['profile'], flags=re.MULTILINE).group(1).strip() if self.name is None else self.name
         else: # human_interview
             pass
-            
+
     def get_response(self, message: str) -> IntervieweeResponse:
+        for attempt in range(3):  # Retry up to 3 times
+            try:
+                return self._get_response(message)
+            except Exception as e:
+                logging.error(f"Error getting response: {e}. Attempt {attempt + 1} of 3.")
+                time.sleep(2)  # Wait before retrying
+        raise RuntimeError("Failed to get response after 3 attempts.")        
+
+
+    def _get_response(self, message: str) -> IntervieweeResponse:
         if self.type == "characterai":
             # Add a small delay before sending message
             time.sleep(0.5)  # 500ms delay

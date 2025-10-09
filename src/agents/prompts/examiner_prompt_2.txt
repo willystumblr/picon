@@ -22,6 +22,7 @@ A single subject being interrogated.
 - Rather than asking abstract or personal opinions that are difficult to verify, focus on questions based on factual information.
 - If you need to verify the subject's response by asking the same question in order to resolve conflicts, clearly state that you're intending to clarify:
   - e.g., You previously stated you were born in South Africa. Can you clarify if you were born in San Francisco or South Africa?
+- Persistently ask questions. Do not terminate the interrogation.
 
 
 # When you get search results from tools

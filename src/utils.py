@@ -3,6 +3,7 @@ import os
 from typing import List, Any
 import logging
 import time
+import select
 import sys
 from litellm import completion
 from google import genai
@@ -16,7 +17,7 @@ def write_json(data: Any, file_path: str) -> None:
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
 
-def get_completion(model: str, messages: list, temperature: float = 0.0, max_retries=3, **kwargs):
+def get_completion(model: str, messages: list, temperature: float = 1.0, max_retries=3, **kwargs):
     for attempt in range(1, max_retries+1):
         try:
             response = completion(
@@ -145,3 +146,12 @@ def batch_request_gemini(display_name:str, messages: List=None, model: str="gemi
     if file_request and input_files:
         # Implement file request logic here
         pass
+
+def get_user_input_with_timeout(timeout: int) -> str:
+    sys.stdout.flush()
+    rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+    if rlist:
+        user_input = sys.stdin.readline().strip().lower()
+        return user_input
+    else:
+        return ''  # No input within the timeout period

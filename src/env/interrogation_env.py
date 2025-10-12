@@ -69,6 +69,7 @@ class InterrogationEnv:
             logging.info(f"[TOOL OUTPUT] {tool_name}: {tool_output[:100]}...") # print first 100 chars
             
             output = ToolOutput(
+                tool_call_id=action.tool_call.details.get('tool_calls')[0].get('id'),
                 tool_name=tool_name,
                 output=tool_output
             )

@@ -10,7 +10,8 @@ class WebSearchAgent(Agent):
     def __init__(self, **kwargs):
         super().__init__(
             role=kwargs.get('role', "web_search"),
-            system_message=kwargs.get('system_message', "")
+            system_message=kwargs.get('system_message', ""),
+            model=kwargs.get('model', "gemini/gemini-2.5-flash")
         )
         self.tools = kwargs.get('tools', [])
         self.cutoff_date = time.strftime("%Y-%m-%d") # default to current date

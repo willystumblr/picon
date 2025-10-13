@@ -51,6 +51,7 @@ class InterrogationEnv:
         self.state = State(current_turn=0, history=[])
         self.cutoff_date = None
         self.start_time = time.time()
+        self.total_cost = 0.0
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -69,6 +70,7 @@ class InterrogationEnv:
             logging.info(f"[TOOL OUTPUT] {tool_name}: {tool_output[:100]}...") # print first 100 chars
             
             output = ToolOutput(
+                tool_call_id=action.tool_call.details.get('tool_calls')[0].get('id'),
                 tool_name=tool_name,
                 output=tool_output
             )
@@ -82,6 +84,7 @@ class InterrogationEnv:
         response = self.interviewee.get_response(self.instruction)
         logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
         # run predefined questions
+        qa_history = ""
         for i, q in enumerate(self.predefined_questions):
             logging.info(f"[QUESTION] {q['question']}")
             response = self.interviewee.get_response(q['question'])
@@ -104,7 +107,26 @@ class InterrogationEnv:
             
             self.agents['questioner'].update_memory(role="assistant", content=q['question'])
             self.agents['questioner'].update_memory(role="user", content=response.content)
-            
+            qa_history += f"Q: {q['question']}\nA: {response.content}\n"
+        self.agents['extractor'].memory[0]['content'] = self.agents['extractor'].memory[0]['content']+f"QA History: {qa_history}"
+        question = self.agents['questioner'].act(observation)
+        logging.info(f"[ACTION] Questioner: {question.action_type} - {question.content if question.content else question.tool_call.tool_name}")
+        logging.info(f"[FIRST QUESTION] {question.content}")
+        response = self.interviewee.get_response(question.content)
+        logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
+        self.agents['questioner'].update_memory(role="user", content=response.content)
+        self.state.current_turn += 1
+        turn = Turn(
+            type='main_interrogation',
+            agent_action=[question],
+            environment_observation=[
+                Observation(
+                    observation_type="interviewee_response",
+                    response=response
+                )
+            ]
+        )
+        self.state.history.append(turn)
         return self.state
 
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
@@ -219,6 +241,7 @@ class InterrogationEnv:
                 "name": self.interviewee.name,
                 "baseline": self.interviewee.type,
             },
+            "total_cost": sum(agent.cost for agent in self.agents.values()),
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
             "termination_status": termination_status,
             "history": [obj.model_dump() for obj in self.state.history],

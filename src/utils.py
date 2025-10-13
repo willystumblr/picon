@@ -3,9 +3,12 @@ import os
 from typing import List, Any
 import logging
 import time
+import select
 import sys
 from litellm import completion
 from google import genai
+from google.genai import types
+from openai import OpenAI
 
 def read_json(file_path: str) -> Any:
     with open(file_path, "r") as f:
@@ -16,7 +19,7 @@ def write_json(data: Any, file_path: str) -> None:
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
 
-def get_completion(model: str, messages: list, temperature: float = 0.0, max_retries=3, **kwargs):
+def get_completion(model: str, messages: list, temperature: float = 1.0, max_retries=3, **kwargs):
     for attempt in range(1, max_retries+1):
         try:
             response = completion(
@@ -55,92 +58,242 @@ def setup_logging(log_to_file: bool, process_name: str = None):
         )
     for noisy in ("LiteLLM", "httpx", "google", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)    
-        
-def _batch_preprocess(messages_lists: List, provider: str="google-genai"):
-    # Implement your batch preprocessing logic here
-    """format messages for batch processing
-    inline_requests = [
-        {
-            'contents': [{
-                'parts': [{'text': 'Tell me a one-sentence joke.'}],
-                'role': 'user'
-            }]
-        },
-        {
-            'contents': [{
-                'parts': [{'text': 'Why is the sky blue?'}],
-                'role': 'user'
-            }]
-        }
-    ]
+
+
+def batch_request(messages: List, model: str, display_name: str = None, sub_batch: bool = False, 
+                  inline: bool = True, **kwargs):
     """
-    if provider == "google-genai":
-        request_list = []
-        for messages in messages_lists:
-            contents = []
-            system_instruction = {}
-            for message in messages:
-                if message['role'] == 'system':
-                    system_instruction['parts'] = [{'text': message['content']}]
-                else:
-                    contents.append({
-                        'parts': [{'text': message['content']}],
-                        'role': message['role']
-                    })
-            request_list.append({
-                'contents': contents,
-                'config': {
-                    'system_instruction': system_instruction,
-                    "thinking_config": {"thinking_budget":1024}
-                }
-            })
-        return request_list
+    Unified batch processing method that intelligently handles different providers and approaches.
+    
+    Args:
+        messages: List of message lists to process
+        model: Model name (determines provider automatically)
+        display_name: Display name for the batch job
+        sub_batch: Whether to split into sub-batches of 500
+        inline: For Gemini, whether to use inline requests (True) or file upload (False)
+        **kwargs: Additional parameters for specific providers
+    
+    Returns:
+        List of results from batch processing
+    """
+    assert messages is not None, "Messages must be provided"
+    
+    # Determine provider from model name
+    if any(provider in model.lower() for provider in ['gpt', 'openai']):
+        provider = 'openai'
+    elif any(provider in model.lower() for provider in ['gemini', 'google']):
+        provider = 'gemini'
     else:
-        ## TODO
-        return None
-
-def batch_request_gemini(display_name:str, messages: List=None, model: str="gemini-2.5-flash", inline_request: bool=True, file_request: bool=False, input_files: str=None, sub_batch: bool=False):
-    if inline_request:
-        # Implement inline request logic here
-        assert messages is not None, "Messages must be provided for inline requests."
-        results = []
-        if sub_batch:
-            batch_size = 500
-        else:
-            batch_size = len(messages)
+        raise ValueError(f"Unsupported model: {model}. Cannot determine provider.")
+    
+    temp_dir = "temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    results = []
+    batch_size = 500 if sub_batch else len(messages)
+    
+    for i in range(0, len(messages), batch_size):
+        batch_messages = messages[i:i + batch_size]
         
-        for i in range(0, len(messages), batch_size):
-            provider = "google-genai" if 'gemini' in model else "other-provider" # placeholder
-            request_list = _batch_preprocess(messages[i:i + batch_size], provider=provider)
-            completion_model = f"gemini/{model}" if "gemini" in model else model
+        if provider == 'openai':
+            results.extend(_process_openai_batch(batch_messages, model, i, batch_size, temp_dir, **kwargs))
+        elif provider == 'gemini':
+            if inline:
+                results.extend(_process_gemini_inline_batch(batch_messages, model, display_name, i, batch_size))
+            else:
+                results.extend(_process_gemini_file_batch(batch_messages, model, display_name, i, batch_size, temp_dir))
+    
+    return results
 
-            client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-            batch_job = client.batches.create(
-                model=model,
-                src=request_list,
-                config={
-                    'display_name': display_name,
-                },
-            )
+
+def _process_openai_batch(messages: List, model: str, batch_index: int, batch_size: int, temp_dir: str, **kwargs):
+    """Process OpenAI batch requests"""
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    filepath = f"{temp_dir}/request_{batch_index//batch_size}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.jsonl"
+    
+    # Prepare JSONL file
+    jsonl_chunks = []
+    for j, message in enumerate(messages):
+        jsonl_format = {
+            "custom_id": f"request-{j}", 
+            "method": "POST", 
+            "url": "/v1/chat/completions", 
+            "body": {
+                "model": model, 
+                "messages": message,
+                "reasoning": { "effort": "low" }
+            }
+        }
+        jsonl_chunks.append(json.dumps(jsonl_format))
+    
+    with open(filepath, "w") as f:
+        f.write("\n".join(jsonl_chunks))
+    
+    # Upload and create batch
+    file_obj = client.files.create(
+        file=open(filepath, "rb"),
+        purpose="batch",
+        expires_after={"anchor": "created_at", "seconds": 86400*2}
+    )
+    
+    batch_job = client.batches.create(
+        input_file_id=file_obj.id,
+        endpoint="/v1/chat/completions",
+        completion_window="24h"
+    )
+    batch_job.errors
+    
+    # Wait for completion and process results
+    return _wait_and_process_openai_results(client, batch_job)
+
+
+def _process_gemini_inline_batch(messages: List, model: str, display_name: str, batch_index: int, batch_size: int):
+    """Process Gemini inline batch requests"""
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    
+    request_list = []
+    for message in messages:
+        contents = []
+        system_instruction = {}
+        for msg in message:
+            if msg['role'] == 'system':
+                system_instruction['parts'] = [{'text': msg['content']}]
+            else:
+                contents.append({
+                    'parts': [{'text': msg['content']}],
+                    'role': msg['role']
+                })
+        request_list.append({
+            'contents': contents,
+            'config': {
+                'system_instruction': system_instruction,
+                "thinking_config": {"thinking_budget":1024}
+            }
+        })
+        
+    batch_job = client.batches.create(
+        model=model,
+        src=request_list,
+        config={'display_name': display_name or f"inline_batch_{time.strftime('%Y-%m-%d_%H-%M-%S')}"}
+    )
+    
+    return _wait_and_process_gemini_results(client, batch_job, inline=True)
+
+
+def _process_gemini_file_batch(messages: List, model: str, display_name: str, batch_index: int, batch_size: int, temp_dir: str):
+    """Process Gemini file-based batch requests"""
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    
+    request_list = []
+    for message in messages:
+        contents = []
+        system_instruction = {}
+        for msg in message:
+            if msg['role'] == 'system':
+                system_instruction['parts'] = [{'text': msg['content']}]
+            else:
+                contents.append({
+                    'parts': [{'text': msg['content']}],
+                    'role': msg['role']
+                })
+        request_list.append({
+            'contents': contents,
+            'config': {
+                'system_instruction': system_instruction,
+                "thinking_config": {"thinking_budget":1024}
+            }
+        })
+    
+    # Prepare JSONL file
+    jsonl_chunks = [{
+        "key": f"request_{batch_index//batch_size}_{j}",
+        "request": req
+    } for j, req in enumerate(request_list)]
+    
+    filepath = f"{temp_dir}/request_{batch_index//batch_size}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.jsonl"
+    with open(filepath, "w") as f:
+        f.write("\n".join(json.dumps(chunk) for chunk in jsonl_chunks))
+    
+    # Upload file and create batch
+    uploaded_file = client.files.upload(
+        file=filepath,
+        config=types.UploadFileConfig(
+            display_name=display_name or f"batch_file_{time.strftime('%Y-%m-%d_%H-%M-%S')}",
+            mime_type="jsonl"
+        )
+    )
+    
+    batch_job = client.batches.create(
+        model=model,
+        src=uploaded_file.name,
+        config={'display_name': display_name or f"batch_job_{time.strftime('%Y-%m-%d_%H-%M-%S')}"}
+    )    
+    
+    return _wait_and_process_gemini_results(client, batch_job, inline=False)
+
+
+def _wait_and_process_openai_results(client: OpenAI, batch_job):
+    """Wait for OpenAI batch completion and process results"""
+    results = []
+    while True:
+        job = client.batches.retrieve(batch_job.id)
+        state = job.status
+        logging.info(f"Current state: {state}")
+        
+        if state == "completed":
+            logging.info("✅ Job succeeded!")
+            logging.info(f"Output file ID: {job.output_file_id}")
+            retrieved_file_obj = client.files.content(job.output_file_id)
+            for line in retrieved_file_obj.iter_lines():
+                result = json.loads(line)
+                results.append(result)
+            break
+        elif state in ("failed", "cancelled"):
+            logging.error(f"Batch job failed with status: {state} - {job.errors}")
+            raise RuntimeError(f"Batch job failed: {state}")
+        
+        else:
+            time.sleep(10)
+    
+    return results
+
+
+def _wait_and_process_gemini_results(client, batch_job, inline=True):
+    """Wait for Gemini batch completion and process results"""
+    results = []
+    while True:
+        job = client.batches.get(name=batch_job.name)
+        state = job.state.name
+        logging.info(f"Current state: {state}")
+        
+        if state == "JOB_STATE_SUCCEEDED":
+            logging.info("✅ Job succeeded!")
             
-            while True:
-                job = client.batches.get(name=batch_job.name)  # Get the latest status
-                state = job.state.name
-                logging.info(f"Current state: {state}")
+            if inline and job.dest and job.dest.inlined_responses:
+                for inline_resp in job.dest.inlined_responses:
+                    if inline_resp.response and inline_resp.response.text:
+                        results.append(inline_resp.response.text)
+            elif not inline and job.dest and job.dest.file_name:
+                result_file_name = job.dest.file_name
+                file_content = client.files.download(file=result_file_name)
+                content = file_content.decode('utf-8')
+                for line in content.splitlines():
+                    result = json.loads(line)
+                    text = result['response']['candidates'][0]['content']['parts'][0]['text']
+                    results.append(text)
+            
+            break
+        elif state in ("JOB_STATE_FAILED", "JOB_STATE_CANCELLED"):
+            raise RuntimeError(f"Batch job failed: {state} - {job.error.details}")
+        else:
+            time.sleep(10)
+    
+    return results
 
-                if state == "JOB_STATE_SUCCEEDED":
-                    logging.info("✅ Job succeeded!")
-                    if job.dest and job.dest.inlined_responses:
-                        for i, inline_resp in enumerate(job.dest.inlined_responses):
-                            if inline_resp.response and inline_resp.response.text:
-                                results.append(inline_resp.response.text)    
-                    break
-                elif state in ("JOB_STATE_FAILED", "JOB_STATE_CANCELLED"):
-                    raise RuntimeError(f"Batch job failed: {state}")
-                else:
-                    time.sleep(10)
-
-        return results
-    if file_request and input_files:
-        # Implement file request logic here
-        pass
+def get_user_input_with_timeout(timeout: int) -> str:
+    sys.stdout.flush()
+    rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+    if rlist:
+        user_input = sys.stdin.readline().strip().lower()
+        return user_input
+    else:
+        return ''  # No input within the timeout period

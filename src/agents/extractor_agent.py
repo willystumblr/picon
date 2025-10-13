@@ -37,6 +37,7 @@ class ExtractorAgent(Agent):
                     temperature=0.0 if not self.model.startswith("gpt") else 1.0,
                     response_format=EntityClaim,
                 )
+                self._calculate_cost(res)
                 res_ext = EntityClaim.model_validate_json(res.choices[0].message.content)  # validate response format
                 if not res_ext.extracted or len(res_ext.extracted) == 0:
                     logging.warning("Extractor did not find any entities or claims. Skipping to next agent.")

@@ -30,7 +30,7 @@ class WebSearchAgent(Agent):
         claim = message.get('claim', 'no claim')
         rationale = message.get('rationale', '')
         if entity != 'no entity':
-            prompt_format = f"Does the following claim-entity pair need to be verified with web-search?\nClaim: {claim}\nEntity: {entity}\nCutoff Date: {self.cutoff_date}"
+            prompt_format = f"Does the following claim-entity pair need to be verified with web-search?\nClaim: {claim}\nEntity: {entity}\nRationale: {rationale}\nCutoff Date: {self.cutoff_date}"
         else:
             prompt_format = f"Does the following claim need to be verified with web-search?\nClaim: {claim}\nCutoff Date: {self.cutoff_date}"
         while True:
@@ -45,6 +45,7 @@ class WebSearchAgent(Agent):
                 tools=self.tools,
                 reasoning_effort="low",
             )
+            self._calculate_cost(res)
             res_ = res.choices[0].message.content.lower()
             if res_ in ['yes', 'no']:
                 break
@@ -58,6 +59,7 @@ class WebSearchAgent(Agent):
                 tools=self.tools,
                 reasoning_effort="low",
             )
+            self._calculate_cost(res)
             res_ = res.choices[0].message.model_dump()
             if 'tool_calls' in res_ and res_['tool_calls']:
                 tool_call = res_['tool_calls'][0]

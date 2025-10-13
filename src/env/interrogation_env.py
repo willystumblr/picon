@@ -51,6 +51,7 @@ class InterrogationEnv:
         self.state = State(current_turn=0, history=[])
         self.cutoff_date = None
         self.start_time = time.time()
+        self.total_cost = 0.0
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -240,6 +241,7 @@ class InterrogationEnv:
                 "name": self.interviewee.name,
                 "baseline": self.interviewee.type,
             },
+            "total_cost": sum(agent.cost for agent in self.agents.values()),
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
             "termination_status": termination_status,
             "history": [obj.model_dump() for obj in self.state.history],

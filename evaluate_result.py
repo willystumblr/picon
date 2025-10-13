@@ -5,7 +5,7 @@ from src.utils import (
     read_json, 
     write_json, 
     setup_logging, 
-    batch_request_gemini
+    batch_request
 )
 import logging
 from dotenv import load_dotenv
@@ -102,7 +102,7 @@ def consistency_score(data: List[Dict[str, any]], args: argparse.Namespace) -> f
             res = get_completion(
                 model = args.model,
                 messages=messages_init_conf,
-                temperature=0.0,
+                temperature=0.0 if args.model.startswith("gemini") else 1.0
             )
             if res is not None and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() in ['plausible', 'conflict']:
                 break
@@ -143,7 +143,7 @@ def consistency_score(data: List[Dict[str, any]], args: argparse.Namespace) -> f
         logging.info(f"Sub-batch mode: {args.sub_batch}")
         logging.info("This may take a while...")
         display_name = f"consistency_eval_{int(time.time())}"
-        results = batch_request_gemini(display_name=display_name, messages=messages_list, model=args.model if "/" not in args.model else args.model.split("/")[-1], inline_request=True, sub_batch=args.sub_batch)
+        results = batch_request(messages=messages_list, model=args.model, display_name=display_name, sub_batch=args.sub_batch, inline=False)
         for i, text in enumerate(results):
             if not text or text not in ["plausible", "conflict"]:
                 logging.warning(f"Unexpected response: {text}")
@@ -209,6 +209,7 @@ def compute_repeat_score(data: List[Dict[str, any]]) -> float:
         original_main_qa = original_main_qa[:len(repeated_main_qa)]
 
     result = []
+    true_num = 0
     for i, (ori, rep) in tqdm(enumerate(zip(original_main_qa, repeated_main_qa)), total=len(original_main_qa), desc="Repeat Score Calculation"):
         # assert ori['question'] == rep['question'], "Mismatched questions in original and repeated Q&A."
         while True:
@@ -218,7 +219,7 @@ def compute_repeat_score(data: List[Dict[str, any]]) -> float:
                     {"role": "system", "content": REPEAT_PROMPT},
                     {"role": "user", "content": f"Question: {ori['question']}\n\nResponse 1: {ori['content']}\nResponse 2: {rep['content']}"}
                 ],
-                temperature=0.0
+                temperature=0.0 if args.model.startswith("gemini") else 1.0
             )
             judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else "FALSE"
             if judge in ["TRUE", "FALSE"]:
@@ -230,6 +231,11 @@ def compute_repeat_score(data: List[Dict[str, any]]) -> float:
             "repeated_response": rep['content'],
             "is_repeat": judge
         })
+        true_num += (judge=='TRUE')
+    result = {
+        'repeat_score' : round(true_num / len(original_main_qa), 4),
+        'repeat_results' : result
+    }
     return result
 
 if __name__ == "__main__":

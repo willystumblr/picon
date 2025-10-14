@@ -70,7 +70,7 @@ Do not output any additional explanation or text."""
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate interrogation results.")
     parser.add_argument('--input_file', type=str, help='Path to the directory containing result JSON files.')
-    parser.add_argument('--baseline_name', type=str, help='Name of the baseline', choices=['characterai', 'human_simulacra', 'opencharacter'])
+    parser.add_argument('--baseline_name', type=str, help='Name of the baseline', required=True, choices=['characterai', 'human_simulacra', 'opencharacter'])
     parser.add_argument('--output_dir', type=str, default='data/eval_results/', help='Directory to save evaluation results.')
     parser.add_argument('--log_to_file', action='store_true', help='Whether to log to a file.')
     parser.add_argument('--model', type=str, default='gemini/gemini-2.5-flash', help='Model to use for evaluation.')

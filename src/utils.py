@@ -120,7 +120,7 @@ def _process_openai_batch(messages: List, model: str, batch_index: int, batch_si
             "body": {
                 "model": model, 
                 "messages": message,
-                "reasoning": { "effort": "low" }
+                #"reasoning": { "effort": "low" }
             }
         }
         jsonl_chunks.append(json.dumps(jsonl_format))
@@ -238,15 +238,27 @@ def _wait_and_process_openai_results(client: OpenAI, batch_job):
         job = client.batches.retrieve(batch_job.id)
         state = job.status
         logging.info(f"Current state: {state}")
-        
+        # logging.info(f"job: {job}")
+        # logging.info(f"job.errors: {job.errors}")
         if state == "completed":
             logging.info("✅ Job succeeded!")
             logging.info(f"Output file ID: {job.output_file_id}")
-            retrieved_file_obj = client.files.content(job.output_file_id)
-            for line in retrieved_file_obj.iter_lines():
-                result = json.loads(line)
-                results.append(result)
-            break
+            try:
+                retrieved_file_obj = client.files.content(job.output_file_id)
+                for line in retrieved_file_obj.iter_lines():
+                    result = json.loads(line)
+                    results.append(result)
+                break
+            except Exception as e:
+                logging.error(f"Error retrieving or processing output file: {e}")
+                err_stream = client.files.content(job.error_file_id)
+                for line in err_stream.iter_lines():
+                    if not line:
+                        continue
+                    record = json.loads(line)
+                    with open("./error_record.json", "w") as f:
+                        f.write(json.dumps(record, indent=2))
+                raise
         elif state in ("failed", "cancelled"):
             logging.error(f"Batch job failed with status: {state} - {job.errors}")
             raise RuntimeError(f"Batch job failed: {state}")

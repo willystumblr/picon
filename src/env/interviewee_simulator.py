@@ -161,7 +161,7 @@ class IntervieweeSimulator:
                 model=self.__nhd_model,
                 messages=[{"role":"system", "content": self.__nhd_prompt}, {"role":"user", "content": f"Interviewer:{message}\nInterviewee: {response}"}],
                 reasoning_effort="low",
-                temperature=1.0 if not self.__nhd_model.startswith("gpt") else 0.0,
+                temperature=1.0 if self.__nhd_model.startswith("gpt") else 0.0,
             )
             res_ = res.choices[0].message.content.strip()
             if res_ in ['### PASS ###', '### FAIL ###']:

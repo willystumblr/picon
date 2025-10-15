@@ -83,6 +83,7 @@ def batch_request(messages: List, model: str, display_name: str = None, sub_batc
         provider = 'openai'
     elif any(provider in model.lower() for provider in ['gemini', 'google']):
         provider = 'gemini'
+        model = model.split('/')[-1]  # Use only the model part for Gemini
     else:
         raise ValueError(f"Unsupported model: {model}. Cannot determine provider.")
     
@@ -247,7 +248,9 @@ def _wait_and_process_openai_results(client: OpenAI, batch_job):
                 retrieved_file_obj = client.files.content(job.output_file_id)
                 for line in retrieved_file_obj.iter_lines():
                     result = json.loads(line)
-                    results.append(result)
+                    breakpoint()
+                    text = result.get('response', {}).get('body', {}).get('choices', [{}])[0].get('message', {}).get('content', '')
+                    results.append(text)
                 break
             except Exception as e:
                 logging.error(f"Error retrieving or processing output file: {e}")

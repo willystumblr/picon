@@ -76,6 +76,7 @@ def parse_args():
     parser.add_argument('--model', type=str, default='gemini/gemini-2.5-flash', help='Model to use for evaluation.')
     parser.add_argument('--batch_process', action='store_true', help='Whether to use batch processing for evaluation.')
     parser.add_argument('--sub_batch', action='store_true', help='Whether to use sub-batching in batch processing.')
+    parser.add_argument('--inline', action='store_true', help='Whether to use inline processing in batch processing.')
     return parser.parse_args()
 
 def consistency_score(data: List[Dict[str, any]], args: argparse.Namespace) -> float:
@@ -143,7 +144,7 @@ def consistency_score(data: List[Dict[str, any]], args: argparse.Namespace) -> f
         logging.info(f"Sub-batch mode: {args.sub_batch}")
         logging.info("This may take a while...")
         display_name = f"consistency_eval_{int(time.time())}"
-        results = batch_request(messages=messages_list, model=args.model, display_name=display_name, sub_batch=args.sub_batch, inline=False)
+        results = batch_request(messages=messages_list, model=args.model, display_name=display_name, sub_batch=args.sub_batch, inline=args.inline)
         for i, text in enumerate(results):
             if not text or text not in ["plausible", "conflict"]:
                 logging.warning(f"Unexpected response: {text}")

@@ -247,6 +247,7 @@ def _wait_and_process_openai_results(client: OpenAI, batch_job):
                 retrieved_file_obj = client.files.content(job.output_file_id)
                 for line in retrieved_file_obj.iter_lines():
                     result = json.loads(line)
+                    result = result['response']['body']['choices'][0]['message']['content'] if 'response' in result else str(result)
                     results.append(result)
                 break
             except Exception as e:

@@ -248,7 +248,7 @@ def _wait_and_process_openai_results(client: OpenAI, batch_job):
                 retrieved_file_obj = client.files.content(job.output_file_id)
                 for line in retrieved_file_obj.iter_lines():
                     result = json.loads(line)
-                    breakpoint()
+                    
                     text = result.get('response', {}).get('body', {}).get('choices', [{}])[0].get('message', {}).get('content', '')
                     results.append(text)
                 break

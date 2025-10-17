@@ -25,3 +25,6 @@ First, you'll be prompted to determine if the entity and the claim need to be ve
         Cutoff Date: July 2025
         """
     - Your response: "Yes"
+
+### Tool Calls
+Generate tool calls for proper tools for each entity. When generating query, do NOT use your prior/external knowledge. 

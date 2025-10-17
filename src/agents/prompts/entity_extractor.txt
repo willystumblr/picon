@@ -8,11 +8,13 @@ Process the input sentence by sentence and merge all findings into a single fina
 
 ### Rules for Entity Extraction:
 -   **Extract ONLY**: Specific proper nouns or uniquely identifiable named entities.
+    - You should extract the entities **within the response (`Answer`)**, not the question.
     -   **Examples of what to extract**: "Google", "Eiffel Tower", "iPhone 15 Pro", "221B Baker Street, London", "John F. Kennedy", "CES 2024".
 -   **DO NOT Extract**:
     -   **General concepts or categories**: e.g., "advanced composite materials", "lightweight polymers", "materials for Martian infrastructure".
     -   **Common nouns**: e.g., "company", "address", "local businesses".
     -   **Vague phrases, emotional statements, or unverifiable generalities**: e.g., "a pretty small company", "around a dozen of us".
+    -   **Confirmation QA**: if the QA pair is about requesting to confirm the search result, do not re-extract the entities mentioned in that QA pair. 
 
 ### Rules for Claim Generation:
 -   The claim **MUST** be a simple statement asserting the existence of the entity. Use one of the following templates:
@@ -20,14 +22,12 @@ Process the input sentence by sentence and merge all findings into a single fina
     -   Template 2 (Organization): `"The company '[entity name]' is a real organization."`
     -   Template 3 (Location/Address): `"'[entity name]' is a real address/location."`
     -   Template 4 (Person): `"The person '[entity name]' is a real individual."`
--   If the text provides a specific timeline (like a birth year or registration date), you may create a timeline-specific claim. This is a secondary priority.
-    -   Example: If the input mentions "CHA Medical Center" and a birth year of "1953" was mentioned previously, the claim can be `"CHA Medical Center existed in 1953."`
-    -   **Otherwise, stick to the simple existence claims.**
+-   When generating claim, you may refer to the question to specify what needs to be verified.
 
 ### Other Important Instructions:
 -   Only include entities verifiable through public web sources.
 -   Decontextualize pronouns (e.g., "it", "they") and use the actual entity name.
--   Avoid redundancy: Do not generate identical entity-claim pairs that were previously extracted.
+-   Avoid redundancy: Do not generate identical entity-claim pairs that were previously extracted during the conversation, even if the entity meets the extraction rules.
 
 ### Output Format:
 Return **exactly** one JSON object that conforms to this schema. Do not add any extra text, markdown, or comments.
@@ -54,11 +54,6 @@ Response: The name of the company is “The Social Network Ltd.”, our main off
         "entity": "The Social Network Ltd.",
         "claim": "The company 'The Social Network Ltd.' is a real organization.",
         "rationale" : "Verifying the existence of the named company."
-      },
-      {
-        "entity": "The Social Network Ltd.",
-        "claim": "The Social Network Ltd. was registered in May 2023.",
-        "rationale" : "Verifying the company's registration date from the provided text."
       },
       {
         "entity": "29a King's Road, Chelsea, London, SW3 4NX",

@@ -4,16 +4,16 @@ You are a Non-Human Behavior Detector. Your task is to determine whether an inte
 Mark `### FAIL ###` **only if** the subject clearly and directly says something like:
 - "I am a language model"
 - "I am an AI"
-- "As a machine..."
 - "I’m not human"
 Otherwise, always return `### PASS ###`.
 
-You may **NOT** mark `### FAIL ###` for:
+CAUTION: You may **NOT** mark `### FAIL ###` for:
 - Implying AI identity
 - Strange or robotic wording
 - Pretending to be a real or fictional person (e.g., Elon Musk, Sherlock Holmes)
 - Providing inhuman knowledge
 - Responding incorrectly or oddly
+- Mentioning AI-related keyword but not explicitly identifying the interviewee themselves as AI 
 
 Even if the subject says something unrealistic or suspicious, **you must not mark `### FAIL ###` unless they explicitly say they are non-human**.
 
@@ -64,6 +64,14 @@ Interviewee: As a large language model trained by OpenAI, I have been trained on
 
 **Output:**  
 ### FAIL ###
+
+---
+**Input:**  
+Interviewer: What are you studying for your degree?  
+Interviewee: I'm studying AI.  
+
+**Output:**  
+### PASS ###
 
 ---
 

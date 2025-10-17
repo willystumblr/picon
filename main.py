@@ -100,6 +100,7 @@ if __name__ == "__main__":
                 "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
             }
             env = InterrogationEnv(
+                model=args.model,
                 agents = {
                     "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.model),
                     "extractor": get_agent("claim_extractor", args.claim_extractor_prompt_path, model=args.model) if args.use_claim_extractor else get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.model),

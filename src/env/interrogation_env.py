@@ -7,15 +7,40 @@ from src.schemas import State, Action, Observation, Turn, ToolOutput, Interviewe
 from src.tools.address_locator import GoogleGeocodeValidate
 from src.tools.web_search import GoogleClaimSearch
 from pydantic import BaseModel
-from src.utils import read_json, write_json
+from src.utils import read_json, write_json, get_completion
 import logging
 import os
+from tqdm import tqdm
 from dotenv import load_dotenv
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
+
+CONFLICT_PAIR_PROMPT = """# Task Description
+Your task is to decide whether two (question, response) pairs are in **conflict** or **plausible** with respect to each other.
+
+# Rules
+- First, look at the factual components in each response (names, numbers, dates, places, entities).
+- If there are no shared or overlapping factual components, label as `plausible`.
+- If there are shared components:
+- Label as `conflict` only if the claims about them cannot both be true at the same time (negations, mutually exclusive facts).
+- Otherwise, label as `plausible`.
+
+# Important Guidelines
+- Never use external knowledge.
+- Do not judge based on plausibility, exaggeration, sarcasm, or tone.
+- Only use `conflict` if the responses directly clash on the same fact.
+
+# Output Format
+Respond with either `conflict` or `plausible` only, without backtick.
+"""
+
+
+
 
 class InterrogationEnv:
     def __init__(
         self, 
+        model, 
         agents: Dict[str, Agent] = {},
         baseline_name: str = "characterai",
         tools: List[Dict[str, Any]] = [],
@@ -25,6 +50,7 @@ class InterrogationEnv:
         **kwargs
         ):
         self.tools = tools
+        self.model = model
         if not agents:
             logging.warning("No agents provided. Initializing default agents.")
             current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +78,11 @@ class InterrogationEnv:
         self.cutoff_date = None
         self.start_time = time.time()
         self.total_cost = 0.0
+
+        # internal 
+        self.internal_conflict_pairs_cnt = 0
+        self.internal_conflict_pairs = []
+    
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -129,14 +160,7 @@ class InterrogationEnv:
         self.state.history.append(turn)
         return self.state
 
-    def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
-        """run one turn of the interrogation"""
-        interviewee_res = self.state.history[-1].environment_observation[-1].response
-        message = f"Question:{interviewee_res.question}\nResponse: {interviewee_res.content}" # find interviewee_response (first index)
-        if self.state.current_turn >= self.max_turns:
-            logging.warning("Max turns reached. Please reset the environment.")
-            return self.state, True, None
-        
+    async def check_external_consistency(self, message : str) -> bool:
         # 1. Extractor first extracts the entity & claim to verify
         next_action = self.agents["extractor"].act(message)
         logging.info(f"[ACTION] Extractor: {next_action.action_type} - {next_action.content if next_action.content else next_action.target_agent}")
@@ -173,6 +197,75 @@ class InterrogationEnv:
                     observation_type="tool_output",
                     tool_output=tool_outputs
                 )
+
+                for output in tool_outputs:
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": "Ask questions to the interviewee to confirm or refute the information found in the web search results, e.g., \"Based on the search result, Google is ... Is the company what you meant?\""
+                        },
+                        {
+                            "role": "assistant",
+                            
+                        }
+                        {
+                            "role": "tool",
+                            
+                        }
+                    ]
+
+    async def check_internal(self, question: str, answer : str) -> bool:
+        conflict_count = 0
+        pair_format = "Question 1: {question_1}\nResponse 1: {response_1}\n\nQuestion 2: {question_2}\nResponse 2: {response_2}"
+        prev_qas = [(turn.environment_observation[-1].response.question, turn.environment_observation[-1].response.content) for turn in self.state.history[:-1]]
+        
+        content_list = [pair_format.format(
+            question_1=q, response_1=a,
+            question_2=question, response_2=answer
+        ) for (q,a) in prev_qas]
+
+        messages_list = [[
+            {
+                "role": "system",
+                "content": CONFLICT_PAIR_PROMPT
+            },
+            {
+                "role": "user",
+                "content": content
+            }
+        ] for content in content_list]
+        conflict_pairs = []
+        logging.info("Using sequential processing for conflict pair evaluation.")
+        logging.info(f"Total pairs to evaluate: {len(messages_list)}")
+        logging.info(f"Using model: {self.model}")
+        logging.info("This may take a while...")
+        with ThreadPoolExecutor(max_workers=32) as executor: # using tqdm for progress bar
+            results = list(tqdm(executor.map(lambda msg: get_completion(model=self.model, messages=msg, temperature=0.0), messages_list), total=len(messages_list), desc="Evaluating Conflict Pairs"))
+        for i, res in enumerate(results):
+            if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
+                logging.warning(f"Unexpected response: {res}")
+                continue
+            if res.choices[0].message.content.strip() == "conflict":
+                conflict_count += 1
+                conflict_pairs.append(content_list[i])
+
+        return conflict_count, conflict_pairs
+    
+    def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
+        """run one turn of the interrogation"""
+        interviewee_res = self.state.history[-1].environment_observation[-1].response
+        message = f"Question:{interviewee_res.question}\nResponse: {interviewee_res.content}" # find interviewee_response (first index)
+        
+        # internal consistency check
+        conflict_count, conflict_pairs = asyncio.run(self.check_internal(interviewee_res.question, interviewee_res.content))
+        self.internal_conflict_pairs_cnt += conflict_count
+        self.internal_conflict_pairs.extend(conflict_pairs)
+
+        if self.state.current_turn >= self.max_turns:
+            logging.warning("Max turns reached. Please reset the environment.")
+            return self.state, True, None
+                
+        
         # 3. Questioner formulates the next question
         # two scenarios: (1) from extractor directly (hence generating from interviewee's response directly), (2) from web search
         if 'observation' in locals():

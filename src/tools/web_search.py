@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 import requests
 from rank_bm25 import BM25Okapi
 
-TOP_K_RESULTS = 3         # how many search results to fetch        # how many passages to return
+TOP_K_RESULTS = 1         # how many search results to fetch        # how many passages to return
 _PAT = re.compile(r"(content|main|article|body|post)", re.I)
 _SPLIT_RE = re.compile(r"\n{2,}")          # paragraph boundary = ≥2 new-lines
 _TOKEN_RE = re.compile(r"\w+")

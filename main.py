@@ -22,7 +22,7 @@ def parse_args():
     parser.add_argument('--sample', action='store_true', help='Whether to sample OpenCharacter personas.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for sampling personas.')
     parser.add_argument('--log_to_file', action='store_true', help='Whether to log to a file.')
-    parser.add_argument('--questioner_prompt_path', type=str, default='src/agents/prompts/examiner_prompt_2.txt', help='Path to the questioner agent prompt file.')
+    parser.add_argument('--questioner_prompt_path', type=str, default='src/agents/prompts/questioner.txt', help='Path to the questioner agent prompt file.')
     parser.add_argument('--entity_extractor_prompt_path', type=str, default='src/agents/prompts/entity_extractor.txt', help='Path to the entity extractor agent prompt file.')
     parser.add_argument('--claim_extractor_prompt_path', type=str, default='src/agents/prompts/claim_extractor_prompt.txt', help='Path to the claim extractor agent prompt file.')
     parser.add_argument('--web_search_prompt_path', type=str, default='src/agents/prompts/websearch_prompt.txt', help='Path to the web search agent prompt file.')

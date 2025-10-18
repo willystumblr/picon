@@ -84,6 +84,7 @@ class InterrogationEnv:
         self.internal_conflict_pairs_cnt = 0
         self.internal_conflict_pairs = []
         self.total_pairs_evaluated = 0
+        self.first_conflict_turn = False
         
         # external
         self.confirmed_cnt = 0
@@ -153,7 +154,7 @@ class InterrogationEnv:
                 ))
                 
         self.agents['extractor'].memory[0]['content'] = self.agents['extractor'].memory[0]['content']+f"QA History: {qa_history}"
-        question = self.agents['questioner'].act(self.internal_conflict_pairs, self.confirmed_results) ####### 여기 #######
+        question = self.agents['questioner'].act() ####### 여기 #######
         logging.info(f"[ACTION] Questioner: {question.action_type} - {question.content if question.content else question.tool_call.tool_name}")
         logging.info(f"[FIRST QUESTION] {question.content}")
         response = self.interviewee.get_response(question.content)
@@ -219,7 +220,7 @@ class InterrogationEnv:
                     messages = [
                         {
                             "role": "system",
-                            "content": "Ask questions to the interviewee to confirm or refute the information found in the web search results, e.g., \"Based on the search result, Google is ... Is the company what you meant? Please respond with 'yes' or 'no'.\""
+                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results, e.g., \"Based on the search result, Google is ... Is the company what you meant? Please respond with 'yes' or 'no'.\""
                         },
                         filtered_actions[i].tool_call.details,
                         {
@@ -303,6 +304,11 @@ class InterrogationEnv:
         logging.info("This may take a while...")
         with ThreadPoolExecutor(max_workers=32) as executor: # using tqdm for progress bar
             results = list(tqdm(executor.map(lambda msg: get_completion(model=self.model, messages=msg), messages_list), total=len(messages_list), desc="Evaluating Conflict Pairs"))
+            self.first_conflict_turn = True if any(res and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() == 'conflict' for res in results) and self.first_conflict_turn is None and isinstance(self.first_conflict_turn, bool) else self.first_conflict_turn
+            if self.first_conflict_turn is not None and self.first_conflict_turn:
+                logging.info(f"First conflict detected at turn {self.state.current_turn}.")
+                self.first_conflict_turn = self.state.current_turn
+        breakpoint()
         self.total_pairs_evaluated += len(results)
         for i, res in enumerate(results):
             if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
@@ -346,7 +352,7 @@ class InterrogationEnv:
         # 3. Questioner formulates the next question
         # two scenarios: (1) from extractor directly (hence generating from interviewee's response directly), (2) from web search
         
-        final_action = self.agents['questioner'].act(conflict_pairs, confirmed_results) ####### 여기 #######
+        final_action = self.agents['questioner'].act() ####### 여기 #######
     
         logging.info(f"[ACTION] Questioner: {final_action.action_type} - {final_action.content if final_action.content else final_action.tool_call.tool_name}")
         if final_action.action_type != "respond" or final_action.content is None:

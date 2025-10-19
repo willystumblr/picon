@@ -13,6 +13,7 @@ import time
 import nest_asyncio
 from dotenv import load_dotenv
 import os
+from litellm.cost_calculator import completion_cost
 
 nest_asyncio.apply()
 
@@ -27,6 +28,7 @@ class IntervieweeSimulator:
         project_root = os.path.dirname(os.path.dirname(current_dir))
         self.__nhd_prompt = open(f"{project_root}/src/agents/prompts/nhd_detector.txt", "r").read()
         self.__nhd_model = kwargs.get('nhd_model', "gemini/gemini-2.5-flash")
+        self.cost = 0.0
         
         if self.type == "characterai":
             #### **character_id, user_id, name** are required ####
@@ -163,6 +165,7 @@ class IntervieweeSimulator:
                 reasoning_effort="low",
                 temperature=1.0 if self.__nhd_model.startswith("gpt") else 0.0,
             )
+            self.cost += completion_cost(res)
             res_ = res.choices[0].message.content.strip()
             if res_ in ['### PASS ###', '### FAIL ###']:
                 break

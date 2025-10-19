@@ -78,7 +78,7 @@ class InterrogationEnv:
         self.state = State(current_turn=0, history=[])
         self.cutoff_date = None
         self.start_time = time.time()
-        self.total_cost = 0.0
+        self.env_cost = 0.0
 
         # internal 
         self.internal_conflict_pairs_cnt = 0
@@ -87,8 +87,9 @@ class InterrogationEnv:
         self.first_conflict_turn = False
         
         # external
-        self.confirmed_cnt = 0
-        self.refuted_cnt = 0
+        self.con_cnt = 0
+        self.incon_cnt = 0
+        self.unknown_cnt = 0
         self.confirmed_results = []
     
 
@@ -174,7 +175,7 @@ class InterrogationEnv:
         self.state.history.append(turn)
         return self.state
 
-    async def check_external_consistency(self, message : str) -> bool:
+    async def check_external(self, message : str) -> bool:
         # 1. Extractor first extracts the entity & claim to verify
         next_action = self.agents["extractor"].act(message)
         logging.info(f"[ACTION] Extractor: {next_action.action_type} - {next_action.content if next_action.content else next_action.target_agent}")
@@ -235,7 +236,7 @@ class InterrogationEnv:
                         messages=messages,
                         reasoning_effort="low",
                     )
-                    self.total_cost += completion_cost(res)
+                    self.env_cost += completion_cost(res)
                     confirmation_question = res.choices[0].message.content.strip()
                     logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
                     response = self.interviewee.get_response(confirmation_question)
@@ -255,21 +256,52 @@ class InterrogationEnv:
                         ],
                         reasoning_effort="low",
                     )
-                    self.total_cost += completion_cost(res)
+                    self.env_cost += completion_cost(res)
                     confirmed = res.choices[0].message.content.strip().lower()
                     if confirmed == 'yes':
-                        self.confirmed_cnt += 1
-                        confirmed_results.append({
-                            "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
-                            "content": str(output.output),
-                            "is_confirmed": True
-                        })
+                        while True:
+                            res = get_completion(
+                                model=self.model,
+                                messages=[
+                                    {
+                                        "role": "system",
+                                        "content": "Based on the question-anwer pair from the interviewee, the search results, and the interviewee's response to the confirmation the results, generate a final verdict if the interviewee's original answer aligns (i.e., consistent) with the search results. Respond with 'yes' if it aligns, 'no' otherwise."
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": f"Original QA: {message}\nSearch Result: {str(output.output)}\nConfirmation QA: {content}"
+                                    }
+                                ],
+                                reasoning_effort="low",
+                            )
+                            self.env_cost += completion_cost(res)
+                            if res and res.choices and res.choices[0].message and res.choices[0].message.content:
+                                final_verdict = res.choices[0].message.content.strip().lower()
+                                if final_verdict in ['yes', 'no']:
+                                    break
+                        if final_verdict == 'yes':
+                            self.con_cnt += 1
+                            confirmed_results.append({
+                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
+                                "content": str(output.output),
+                                "is_confirmed": True,
+                                "external_verdict": True
+                            })
+                        else:
+                            self.incon_cnt += 1
+                            confirmed_results.append({
+                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
+                                "content": str(output.output),
+                                "is_confirmed": True,
+                                "external_verdict": False
+                            })
                     else:
-                        self.refuted_cnt += 1
+                        self.unknown_cnt += 1
                         confirmed_results.append({
                             "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
                             "content": str(output.output),
-                            "is_confirmed": False
+                            "is_confirmed": False,
+                            "external_verdict": False
                         })
             else:
                 observation = None
@@ -304,17 +336,15 @@ class InterrogationEnv:
         logging.info("This may take a while...")
         with ThreadPoolExecutor(max_workers=32) as executor: # using tqdm for progress bar
             results = list(tqdm(executor.map(lambda msg: get_completion(model=self.model, messages=msg), messages_list), total=len(messages_list), desc="Evaluating Conflict Pairs"))
-            self.first_conflict_turn = True if any(res and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() == 'conflict' for res in results) and self.first_conflict_turn is None and isinstance(self.first_conflict_turn, bool) else self.first_conflict_turn
-            if self.first_conflict_turn is not None and self.first_conflict_turn:
-                logging.info(f"First conflict detected at turn {self.state.current_turn}.")
+            if isinstance(self.first_conflict_turn, bool) and not self.first_conflict_turn and any(res and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() == 'conflict' for res in results):
                 self.first_conflict_turn = self.state.current_turn
-        breakpoint()
+                logging.info(f"First conflict detected at turn {self.state.current_turn}.")
         self.total_pairs_evaluated += len(results)
         for i, res in enumerate(results):
             if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
                 logging.warning(f"Unexpected response: {res}")
                 continue
-            self.total_cost += completion_cost(res)
+            self.env_cost += completion_cost(res)
             if res.choices[0].message.content.strip() == "conflict":
                 conflict_count += 1
                 conflict_pairs.append(content_list[i])
@@ -329,7 +359,7 @@ class InterrogationEnv:
         self.internal_conflict_pairs_cnt += conflict_count
         self.internal_conflict_pairs.extend(conflict_pairs)
 
-        next_action, observation, filtered_actions, confirmed_results = await self.check_external_consistency(message)
+        next_action, observation, filtered_actions, confirmed_results = await self.check_external(message)
         self.confirmed_results.extend(confirmed_results)
         
         return next_action, observation, filtered_actions, confirmed_results, conflict_pairs
@@ -339,15 +369,15 @@ class InterrogationEnv:
         """run one turn of the interrogation"""
         interviewee_res = self.state.history[-1].environment_observation[-1].response
         
+
         next_action, observation, filtered_actions, confirmed_results, conflict_pairs = asyncio.run(self.consistency_check(
             interviewee_res.question,
             interviewee_res.content
         ))
-
+        
         if self.state.current_turn >= self.max_turns:
             logging.warning("Max turns reached. Please reset the environment.")
-            return self.state, True, None
-                
+            return self.state, True
         
         # 3. Questioner formulates the next question
         # two scenarios: (1) from extractor directly (hence generating from interviewee's response directly), (2) from web search
@@ -358,6 +388,7 @@ class InterrogationEnv:
         if final_action.action_type != "respond" or final_action.content is None:
             logging.error("Questioner must respond with a question.")
             return self.state, True
+        
         # ask the question to the interviewee
         question = final_action.content
         logging.info(f"[QUESTION] {question}")
@@ -382,8 +413,8 @@ class InterrogationEnv:
         if observation:
             turn.environment_observation.insert(0, observation) # tool output should come before interviewee response, hence the last element is interviewee response
         self.state.history.append(turn)
-        done = self.state.current_turn >= self.max_turns
-        return self.state, done
+
+        return self.state, False
 
 
     def finalize(self):
@@ -414,7 +445,7 @@ class InterrogationEnv:
                 "name": self.interviewee.name,
                 "baseline": self.interviewee.type,
             },
-            "total_cost": sum(agent.cost for agent in self.agents.values()),
+            "total_cost": sum(agent.cost for agent in self.agents.values()) + self.interviewee.cost + self.env_cost,
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
             "termination_status": termination_status,
             "history": [obj.model_dump() for obj in self.state.history],
@@ -422,26 +453,28 @@ class InterrogationEnv:
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
             "external_consistency": {
-                "confirmed_count": self.confirmed_cnt,
-                "refuted_count": self.refuted_cnt,
-                "confirmed_rate": self.confirmed_cnt / (self.confirmed_cnt + self.refuted_cnt) if (self.confirmed_cnt + self.refuted_cnt) > 0 else 0,
+                "consistent": self.con_cnt,
+                "inconsistent": self.incon_cnt,
+                "unknown": self.unknown_cnt,
+                "consistency": self.con_cnt / (self.con_cnt + self.incon_cnt) if (self.con_cnt + self.incon_cnt) > 0 else 0,
                 "confirmed_results": self.confirmed_results
             },
             "internal_consistency": {
+                "first_conflict_turn": self.first_conflict_turn,
                 "conflict_pairs_count": self.internal_conflict_pairs_cnt,
                 "conflict_pairs": self.internal_conflict_pairs,
                 "total_pairs_evaluated": self.total_pairs_evaluated,
                 "conflict_rate": self.internal_conflict_pairs_cnt / self.total_pairs_evaluated if self.total_pairs_evaluated > 0 else 0
             }
         }
+        write_json(final_result, path)
         
         logging.info(f"Saving final result to {path}")
         logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
-        logging.info(f"Confirmed rate: {final_result['external_consistency']['confirmed_rate']}")
-        logging.info(f"Conflict rate: {final_result['internal_consistency']['conflict_rate']}")
+        logging.info(f"First conflict turn: {final_result['internal_consistency']['first_conflict_turn']}")
+        logging.info(f"External consistency: {final_result['external_consistency']['consistency']}")
+        logging.info(f"Internal consistency: {final_result['internal_consistency']['conflict_rate']}")
         
-        write_json(final_result, path)
-
 
 if __name__ == "__main__":
     from src.utils import setup_logging

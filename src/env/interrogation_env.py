@@ -288,30 +288,27 @@ class InterrogationEnv:
                                 final_verdict = res.choices[0].message.content.strip().lower()
                                 if final_verdict in ['yes', 'no']:
                                     break
+                        confirmed_result = {
+                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
+                                "original_qa": message,
+                                "content": str(output.output),
+                                "confirmation_qa": content,
+                            }
                         if final_verdict == 'yes':
                             self.con_cnt += 1
-                            confirmed_results.append({
-                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
-                                "content": str(output.output),
-                                "is_confirmed": True,
-                                "external_verdict": True
-                            })
+                            confirmed_result["is_confirmed"] = True
+                            confirmed_result["external_verdict"] = True
+                            confirmed_results.append(confirmed_result)
                         else:
                             self.incon_cnt += 1
-                            confirmed_results.append({
-                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
-                                "content": str(output.output),
-                                "is_confirmed": True,
-                                "external_verdict": False
-                            })
+                            confirmed_result["is_confirmed"] = True
+                            confirmed_result["external_verdict"] = False
+                            confirmed_results.append(confirmed_result)
                     else:
                         self.unknown_cnt += 1
-                        confirmed_results.append({
-                            "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
-                            "content": str(output.output),
-                            "is_confirmed": False,
-                            "external_verdict": False
-                        })
+                        confirmed_result["is_confirmed"] = False
+                        confirmed_result["external_verdict"] = False
+                        confirmed_results.append(confirmed_result)
             else:
                 observation = None
                 filtered_actions = []

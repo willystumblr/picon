@@ -259,6 +259,15 @@ class InterrogationEnv:
                     self.env_cost += completion_cost(res)
                     confirmed = res.choices[0].message.content.strip().lower()
                     if confirmed == 'yes':
+                        if any([s in str(output.output) for s in ["[content-extraction-failed]", "Search failure:", "No text could be extracted from the top results.", "[Error fetching]"]]):
+                            self.con_cnt += 1
+                            confirmed_results.append({
+                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
+                                "content": str(output.output),
+                                "is_confirmed": True,
+                                "external_verdict": True
+                            })
+                            continue
                         while True:
                             res = get_completion(
                                 model=self.model,

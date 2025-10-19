@@ -258,15 +258,18 @@ class InterrogationEnv:
                     )
                     self.env_cost += completion_cost(res)
                     confirmed = res.choices[0].message.content.strip().lower()
+                    confirmed_result = {
+                        "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
+                        "original_qa": message,
+                        "content": str(output.output),
+                        "confirmation_qa": content,
+                    }
                     if confirmed == 'yes':
                         if any([s in str(output.output) for s in ["[content-extraction-failed]", "Search failure:", "No text could be extracted from the top results.", "[Error fetching]"]]):
                             self.con_cnt += 1
-                            confirmed_results.append({
-                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
-                                "content": str(output.output),
-                                "is_confirmed": True,
-                                "external_verdict": True
-                            })
+                            confirmed_result["is_confirmed"] = True
+                            confirmed_result["external_verdict"] = True
+                            confirmed_results.append(confirmed_result)
                             continue
                         while True:
                             res = get_completion(
@@ -288,12 +291,6 @@ class InterrogationEnv:
                                 final_verdict = res.choices[0].message.content.strip().lower()
                                 if final_verdict in ['yes', 'no']:
                                     break
-                        confirmed_result = {
-                                "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
-                                "original_qa": message,
-                                "content": str(output.output),
-                                "confirmation_qa": content,
-                            }
                         if final_verdict == 'yes':
                             self.con_cnt += 1
                             confirmed_result["is_confirmed"] = True

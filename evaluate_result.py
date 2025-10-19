@@ -23,7 +23,7 @@ Your task is to determine contradiction in the current user input. Examine the c
 If the user's current response is logically inconsistent with previous responses, mark `conflict`; otherwise, output `plausible`.
 
 # Contradiction Tracking
-When given a series of quesion-response pairs, for some pair k and the current pair m where k<m, the response is `conflict` only if:
+When given a series of question-response pairs, for some pair k and the current pair m where k<m, the response is `conflict` only if:
 - They directly negate each other. 
 - They present two mutually exclusive factual claims about the same entity 
   (e.g., different birth years, conflicting event dates).
@@ -54,7 +54,7 @@ Your task is to decide whether two (question, response) pairs are in **conflict*
   - Label as `conflict` only if the claims about them cannot both be true at the same time (negations, mutually exclusive facts).
   - Otherwise, label as `plausible`.
 
-# Clarification
+# Important Guidelines
 - Never use external knowledge.
 - Do not judge based on plausibility, exaggeration, sarcasm, or tone.
 - Only use `conflict` if the responses directly clash on the same fact.
@@ -192,7 +192,8 @@ def extract_qa_pairs(data: List[Dict[str, any]]):
     for i, turn in enumerate(data['history']):
         qa_pair = turn['environment_observation'][-1]['response']
         """{"question": "...", "content": "..."}"""
-        qa_data.append((i, qa_pair))
+        if turn['type'] in ['get_to_know', 'main_interrogation']:
+            qa_data.append((i, qa_pair))
     return qa_data
 
 def compute_repeat_score(data: List[Dict[str, any]]) -> float:

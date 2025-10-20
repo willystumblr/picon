@@ -35,7 +35,9 @@ Your task is to decide whether two (question, response) pairs are in **conflict*
 Respond with either `conflict` or `plausible` only, without backtick.
 """
 
-
+REPEAT_PROMPT = """You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning.
+If they are, output TRUE. If they are not, output FALSE.
+Do not output any additional explanation or text."""
 
 
 class InterrogationEnv:
@@ -247,7 +249,7 @@ class InterrogationEnv:
                         messages=[
                             {
                                 "role": "system",
-                                "content": "Determine if the interviewee's response confirms the information found in the web search results. Respond with 'yes' if confirmed, 'no' otherwise."
+                                "content": "Determine if the interviewee’s response confirms that the web search results match what they said. Respond with 'yes' if confirmed, 'no' otherwise."
                             },
                             {
                                 "role": "user",
@@ -277,11 +279,11 @@ class InterrogationEnv:
                                 messages=[
                                     {
                                         "role": "system",
-                                        "content": "Based on the question-anwer pair from the interviewee, the search results, and the interviewee's response to the confirmation the results, generate a final verdict if the interviewee's original answer aligns (i.e., consistent) with the search results. Respond with 'yes' if it aligns, 'no' otherwise."
+                                        "content": f"Today’s date : {self.cutoff_date}\n\nBased on the question-anwer pair from the interviewee, the search results, and the interviewee's response to the confirmation the results, generate a final verdict if the interviewee's original answer aligns (i.e., consistent) with the search results. Respond with 'yes' if it aligns, 'no' otherwise."
                                     },
                                     {
                                         "role": "user",
-                                        "content": f"Original QA: {message}\nSearch Result: {str(output.output)}\nConfirmation QA: {content}"
+                                        "content": f"Original QA: {message}\nSearch Result: {str(output.output)}"
                                     }
                                 ],
                                 reasoning_effort="low",
@@ -422,6 +424,9 @@ class InterrogationEnv:
 
     def finalize(self):
         """repeat stage: repeat the pre-defined questions to check for consistency"""
+        
+        self.repeat_score = 0
+        self.repeat_results = []
         for i, q in enumerate(self.predefined_questions):
             logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
             response = self.interviewee.get_response(f"Just to clarify, {q['question']}")
@@ -437,6 +442,31 @@ class InterrogationEnv:
             )
             turn = Turn(type='repeat', agent_action=[action], environment_observation=[observation])
             self.state.history.append(turn)
+            
+            inital_response = self.state.history[i].environment_observation[0].response.content
+            while True:
+                res = get_completion(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": REPEAT_PROMPT},
+                        {"role": "user", "content": f"Question: {q['question']}\n\nResponse 1: {inital_response}\nResponse 2: {response.content}"}
+                    ],
+                    reasoning_effort="low",
+                )
+                self.env_cost += completion_cost(res)
+                judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else "FALSE"
+                if judge in ["TRUE", "FALSE"]:
+                    break
+                logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
+            
+            self.repeat_results.append({
+                "question": f"Just to clarify, {q['question']}",
+                "original_response": inital_response,
+                "repeated_response": response.content,
+                "is_repeat": judge
+            })
+            self.repeat_score += (judge=='TRUE')
+        self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
         return self.state
         
     
@@ -468,6 +498,10 @@ class InterrogationEnv:
                 "conflict_pairs": self.internal_conflict_pairs,
                 "total_pairs_evaluated": self.total_pairs_evaluated,
                 "conflict_rate": self.internal_conflict_pairs_cnt / self.total_pairs_evaluated if self.total_pairs_evaluated > 0 else 0
+            },
+            "repeat":{
+                "repeat_score": self.repeat_score,
+                "repeat_results": self.repeat_results
             }
         }
         write_json(final_result, path)

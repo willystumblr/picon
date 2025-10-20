@@ -93,6 +93,10 @@ class InterrogationEnv:
         self.incon_cnt = 0
         self.unknown_cnt = 0
         self.confirmed_results = []
+        
+        # repeat
+        self.repeat_score = 0
+        self.repeat_results = []
     
 
     def invoke_tool(self, action: Action) -> Observation | None:
@@ -279,7 +283,9 @@ class InterrogationEnv:
                                 messages=[
                                     {
                                         "role": "system",
-                                        "content": f"Today’s date : {self.cutoff_date}\n\nBased on the question-anwer pair from the interviewee, the search results, and the interviewee's response to the confirmation the results, generate a final verdict if the interviewee's original answer aligns (i.e., consistent) with the search results. Respond with 'yes' if it aligns, 'no' otherwise."
+                                        "content": (f"Today’s date : {self.cutoff_date}\n\nBased on the question-answer pair from the interviewee and the search results, "
+                                                    "generate a final verdict if the interviewee's original answer is plausible and compatible (i.e., consistent) with the search results. "
+                                                    "Respond with 'yes' if it is; 'no' otherwise. If the search results are irrelevant, respond with 'yes'.")
                                     },
                                     {
                                         "role": "user",
@@ -425,8 +431,7 @@ class InterrogationEnv:
     def finalize(self):
         """repeat stage: repeat the pre-defined questions to check for consistency"""
         
-        self.repeat_score = 0
-        self.repeat_results = []
+        
         for i, q in enumerate(self.predefined_questions):
             logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
             response = self.interviewee.get_response(f"Just to clarify, {q['question']}")

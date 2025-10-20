@@ -14,7 +14,7 @@ Process the input sentence by sentence and merge all findings into a single fina
     -   **General concepts or categories**: e.g., "advanced composite materials", "lightweight polymers", "materials for Martian infrastructure".
     -   **Common nouns**: e.g., "company", "address", "local businesses".
     -   **Vague phrases, emotional statements, or unverifiable generalities**: e.g., "a pretty small company", "around a dozen of us".
-    -   **Confirmation QA**: if the QA pair is about requesting to confirm the search result, do not re-extract the entities mentioned in that QA pair. 
+    -   **Temporal, numerical, or purely descriptive information** (e.g., specific dates, times, quantities, or measurements); *unless* they are part of a named entity (e.g., “CES 2024”, “Formula 1 2023”)
 
 ### Rules for Claim Generation:
 -   The claim **MUST** be a simple statement asserting the existence of the entity. Use one of the following templates:
@@ -22,11 +22,12 @@ Process the input sentence by sentence and merge all findings into a single fina
     -   Template 2 (Organization): `"The company '[entity name]' is a real organization."`
     -   Template 3 (Location/Address): `"'[entity name]' is a real address/location."`
     -   Template 4 (Person): `"The person '[entity name]' is a real individual."`
--   When generating claim, you may refer to the question to specify what needs to be verified.
+-   Generate claims that are contextually appropriate to the given response.
+-   You may refer to the question to specify what needs to be verified; e.g., you may refer to other named entities mentioned in the question to decontextualize the claim.
 
 ### Other Important Instructions:
 -   Only include entities verifiable through public web sources.
--   Decontextualize pronouns (e.g., "it", "they") and use the actual entity name.
+-   Decontextualize pronouns (e.g., "it", "they") and use the actual entity name if mentioned.
 -   Avoid redundancy: Do not generate identical entity-claim pairs that were previously extracted during the conversation, even if the entity meets the extraction rules.
 
 ### Output Format:

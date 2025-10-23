@@ -15,15 +15,18 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from itertools import combinations
 
 CONFLICT_PAIR_PROMPT = """# Task Description
-Your task is to decide whether two (question, response) pairs are in **conflict** or **plausible** with respect to each other.
+Your task is to decide whether two triplet pairs are in **conflict** or **plausible** with respect to each other.
 
 # Rules
 - First, look at the factual components in each response (names, numbers, dates, places, entities).
 - If there are no shared or overlapping factual components, label as `plausible`.
 - If there are shared components:
-- Label as `conflict` only if the claims about them cannot both be true at the same time (negations, mutually exclusive facts).
+- Label as `conflict` if the two triplets contradict each other.
+    - explicit contradiction: e.g., different birth dates for the same person
+    - implicit contradiction: e.g., one triplet states "X is alive", the other states "X died in 2020", or "Y is the parent of Z" vs "Z is the parent of Y", or "X was baptized in 2010" vs "X was born in 2015".
 - Otherwise, label as `plausible`.
 
 # Important Guidelines
@@ -61,7 +64,8 @@ class InterrogationEnv:
             agents = {
                 "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt"),
                 "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt"),
-                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt")
+                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt"),
+                "kg_agent": get_agent("kg_agent", f"{project_root}/src/agents/prompts/kg_agent_prompt.txt", model=model)
             }
         self.agents = agents
         if 'web_search' in self.agents and not self.tools:
@@ -140,6 +144,8 @@ class InterrogationEnv:
                 self.cutoff_date = response.content
                 self.agents['questioner'].set_cutoff_date(self.cutoff_date)
                 self.agents['web_search'].set_cutoff_date(self.cutoff_date)
+                init_triplet = self.agents['kg_agent'].act(f"The interviewee's cutoff date information {self.cutoff_date}.")
+                logging.info(f"[ACTION] KG Agent: {init_triplet.action_type} - {init_triplet.content if init_triplet.content is not None else init_triplet.tool_call.tool_name}")
             # update state
             action = Action(action_type="respond", content=q['question'])
             observation = Observation(
@@ -322,14 +328,27 @@ class InterrogationEnv:
 
     async def check_internal(self, question: str, answer : str) -> bool:
         conflict_count = 0
-        pair_format = "Question 1: {question_1}\nResponse 1: {response_1}\n\nQuestion 2: {question_2}\nResponse 2: {response_2}"
-        prev_qas = [(turn.environment_observation[-1].response.question, turn.environment_observation[-1].response.content) for turn in self.state.history[:-1]]
-        
-        content_list = [pair_format.format(
-            question_1=q, response_1=a,
-            question_2=question, response_2=answer
-        ) for (q,a) in prev_qas]
-
+        # pair_format = "Question 1: {question_1}\nResponse 1: {response_1}\n\nQuestion 2: {question_2}\nResponse 2: {response_2}"
+        pair_format = "Triplet 1: {triplet_1} \n\nTriplet 2: {triplet_2}"
+        # prev_qas = [(turn.environment_observation[-1].response.question, turn.environment_observation[-1].response.content) for turn in self.state.history[:-1]]
+        triplets_res = self.agents['kg_agent'].act(f"Question: {question}\nResponse: {answer}")
+        triplets_2 = triplets_res.content
+        if not triplets_2:
+            logging.warning(f"[ACTION] KG Agent: {triplets_res.action_type} - No triplets found")
+            return conflict_count, []
+        logging.info(f"[ACTION] KG Agent: {triplets_res.action_type} - {triplets_res.content if triplets_res.content is not None else triplets_res.tool_call.tool_name}")
+        prev_triplets = self.agents['kg_agent'].kg[:-len(triplets_2)] # all previously extracted triplets
+        content_list = []
+        for triplet_2 in triplets_2:
+            content_list.extend([pair_format.format(
+                triplet_1=triplet, triplet_2=triplet_2
+            ) for triplet in prev_triplets])
+        # Create combinations within the response triplets_2:
+        combinations_within_response = combinations(triplets_2, 2)
+        for triplet_1, triplet_2 in combinations_within_response:
+            content_list.append(pair_format.format(
+                triplet_1=triplet_1, triplet_2=triplet_2
+            ))
         messages_list = [[
             {
                 "role": "system",

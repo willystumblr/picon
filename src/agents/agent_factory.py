@@ -30,5 +30,8 @@ def get_agent(
     elif agent_type == "web_search":
         from src.agents.web_search_agent import WebSearchAgent
         return WebSearchAgent(role="web_search", system_message=open(system_message_path).read(), **kwargs)
+    elif agent_type == "kg_agent":
+        from src.agents.kg_agent import KGAgent
+        return KGAgent(role="kg_agent", system_message=open(system_message_path).read() if system_message_path else "Extract knowledge triplets from the given QA pair.", **kwargs)
     else:
         raise ValueError(f"Unsupported agent type: {agent_type}")

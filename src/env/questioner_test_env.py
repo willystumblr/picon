@@ -319,6 +319,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser(description="Questioner Test Environment")
     parser.add_argument("--model", type=str, default="gpt-5", help="Model to use")
+    parser.add_argument("--max_turns", type=int, default=30, help="Maximum number of turns")
     args = parser.parse_args()
 
     env = QuestionerTestEnv(
@@ -334,7 +335,7 @@ if __name__ == "__main__":
             ),
             "google_geocode_validate": GoogleGeocodeValidate(api_key=os.environ.get('GOOGLE_GEOCODE'))
         },
-        max_turns=30,
+        max_turns=args.max_turns,
         nhd_model=args.model
     )
     state = env.reset()

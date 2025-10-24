@@ -55,7 +55,7 @@ class QuestionerAgent(Agent):
             reasoning_effort="low"
         )
         self._calculate_cost(res)
-        logging.info(f"[REASONING TRACE] {self.role} {res.choices[0].message.reasoning_content}")
+        # logging.info(f"[REASONING TRACE] {self.role} {res.choices[0].message.reasoning_content}")
         question = res.choices[0].message.content.strip()
         self.update_memory(role="assistant", content=question)
         return Action(agent=self.role, action_type="respond", content=question)

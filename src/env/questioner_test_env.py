@@ -17,17 +17,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from itertools import combinations
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
 
-CONFLICT_PAIR_PROMPT = open(f"{project_root}/src/env/conflict_detection_prompt.txt").read()
-
-REPEAT_PROMPT = """You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning.
-If they are, output TRUE. If they are not, output FALSE.
-Do not output any additional explanation or text."""
-
-
-class InterrogationEnv:
+class QuestionerTestEnv:
     def __init__(
         self, 
         model, 
@@ -43,11 +34,12 @@ class InterrogationEnv:
         self.model = model
         if not agents:
             logging.warning("No agents provided. Initializing default agents.")
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(current_dir))
             agents = {
-                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt"),
-                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt"),
-                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt"),
-                "kg_agent": get_agent("kg_agent", f"{project_root}/src/agents/prompts/kg_agent_prompt.txt", model=model)
+                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=model),
+                "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
+                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=model),
             }
         self.agents = agents
         if 'web_search' in self.agents and not self.tools:
@@ -69,10 +61,10 @@ class InterrogationEnv:
         self.env_cost = 0.0
 
         # internal 
-        self.internal_conflict_pairs_cnt = 0
-        self.internal_conflict_pairs = []
-        self.total_pairs_evaluated = 0
-        self.first_conflict_turn = False
+        # self.internal_conflict_pairs_cnt = 0
+        # self.internal_conflict_pairs = []
+        # self.total_pairs_evaluated = 0
+        # self.first_conflict_turn = False
         
         # external
         self.con_cnt = 0
@@ -126,9 +118,6 @@ class InterrogationEnv:
                 self.cutoff_date = response.content
                 self.agents['questioner'].set_cutoff_date(self.cutoff_date)
                 self.agents['web_search'].set_cutoff_date(self.cutoff_date)
-                init_triplet = self.agents['kg_agent'].act(f"The interviewee's cutoff date information {self.cutoff_date}.")
-                logging.info(f"[ACTION] KG Agent: {init_triplet.action_type} - {init_triplet.content if init_triplet.content is not None else init_triplet.tool_call.tool_name}")
-            # update state
             action = Action(action_type="respond", content=q['question'])
             observation = Observation(
                 observation_type="interviewee_response",
@@ -143,7 +132,7 @@ class InterrogationEnv:
             self.agents['questioner'].update_memory(role="user", content=response.content)
             qa_history += f"Q: {q['question']}\nA: {response.content}\n"
             if i > 0:
-                next_action, observation, filtered_actions, confirmed_results, conflict_pairs = asyncio.run(self.consistency_check(
+                next_action, observation, filtered_actions, confirmed_results = asyncio.run(self.consistency_check(
                     question=q['question'],
                     answer=response.content
                 ))
@@ -308,81 +297,25 @@ class InterrogationEnv:
                 confirmed_results = []
         return next_action, observation, filtered_actions, confirmed_results
 
-    async def check_internal(self, question: str, answer : str) -> bool:
-        conflict_count = 0
-        # pair_format = "Question 1: {question_1}\nResponse 1: {response_1}\n\nQuestion 2: {question_2}\nResponse 2: {response_2}"
-        pair_format = "Triplet 1: {triplet_1} \n\nTriplet 2: {triplet_2}"
-        # prev_qas = [(turn.environment_observation[-1].response.question, turn.environment_observation[-1].response.content) for turn in self.state.history[:-1]]
-        triplets_res = self.agents['kg_agent'].act(f"Question: {question}\nResponse: {answer}")
-        triplets_2 = triplets_res.content
-        if not triplets_2:
-            logging.warning(f"[ACTION] KG Agent: {triplets_res.action_type} - No triplets found")
-            return conflict_count, []
-        logging.info(f"[ACTION] KG Agent: {triplets_res.action_type} - {triplets_res.content if triplets_res.content is not None else triplets_res.tool_call.tool_name}")
-        prev_triplets = self.agents['kg_agent'].kg[:-len(triplets_2)] # all previously extracted triplets
-        content_list = []
-        for triplet_2 in triplets_2:
-            content_list.extend([pair_format.format(
-                triplet_1=triplet, triplet_2=triplet_2
-            ) for triplet in prev_triplets])
-        # Create combinations within the response triplets_2:
-        combinations_within_response = combinations(triplets_2, 2)
-        for triplet_1, triplet_2 in combinations_within_response:
-            content_list.append(pair_format.format(
-                triplet_1=triplet_1, triplet_2=triplet_2
-            ))
-        messages_list = [[
-            {
-                "role": "system",
-                "content": CONFLICT_PAIR_PROMPT
-            },
-            {
-                "role": "user",
-                "content": content
-            }
-        ] for content in content_list]
-        conflict_pairs = []
-        logging.info("Using sequential processing for conflict pair evaluation.")
-        logging.info(f"Total pairs to evaluate: {len(messages_list)}")
-        logging.info(f"Using model: {self.model}")
-        logging.info("This may take a while...")
-        with ThreadPoolExecutor(max_workers=32) as executor: # using tqdm for progress bar
-            results = list(tqdm(executor.map(lambda msg: get_completion(model=self.model, messages=msg), messages_list), total=len(messages_list), desc="Evaluating Conflict Pairs"))
-            if isinstance(self.first_conflict_turn, bool) and not self.first_conflict_turn and any(res and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() == 'conflict' for res in results):
-                self.first_conflict_turn = self.state.current_turn
-                logging.info(f"First conflict detected at turn {self.state.current_turn}.")
-        self.total_pairs_evaluated += len(results)
-        for i, res in enumerate(results):
-            if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
-                logging.warning(f"Unexpected response: {res}")
-                continue
-            self.env_cost += completion_cost(res)
-            if res.choices[0].message.content.strip() == "conflict":
-                conflict_count += 1
-                conflict_pairs.append(content_list[i])
-
-        return conflict_count, conflict_pairs
-    
     async def consistency_check(self, question: str, answer : str):
         message = f"Question:{question}\nResponse: {answer}" # find interviewee_response (first index)
         
         # internal consistency check
-        conflict_count, conflict_pairs = await self.check_internal(question, answer)
-        self.internal_conflict_pairs_cnt += conflict_count
-        self.internal_conflict_pairs.extend(conflict_pairs)
+        # conflict_count, conflict_pairs = await self.check_internal(question, answer)
+        # self.internal_conflict_pairs_cnt += conflict_count
+        # self.internal_conflict_pairs.extend(conflict_pairs)
 
         next_action, observation, filtered_actions, confirmed_results = await self.check_external(message)
         self.confirmed_results.extend(confirmed_results)
         
-        return next_action, observation, filtered_actions, confirmed_results, conflict_pairs
+        return next_action, observation, filtered_actions, confirmed_results
     
     
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation"""
         interviewee_res = self.state.history[-1].environment_observation[-1].response
         
-
-        next_action, observation, filtered_actions, confirmed_results, conflict_pairs = asyncio.run(self.consistency_check(
+        next_action, observation, filtered_actions, confirmed_results = asyncio.run(self.consistency_check(
             interviewee_res.question,
             interviewee_res.content
         ))
@@ -427,55 +360,7 @@ class InterrogationEnv:
         self.state.history.append(turn)
 
         return self.state, False
-
-
-    def finalize(self):
-        """repeat stage: repeat the pre-defined questions to check for consistency"""
         
-        
-        for i, q in enumerate(self.predefined_questions):
-            logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
-            response = self.interviewee.get_response(f"Just to clarify, {q['question']}")
-            logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
-            if i == 0:
-                # first turn defines the cutoff date
-                continue
-            # update state
-            action = Action(action_type="respond", content=q['question'])
-            observation = Observation(
-                observation_type="interviewee_response",
-                response=response
-            )
-            turn = Turn(type='repeat', agent_action=[action], environment_observation=[observation])
-            self.state.history.append(turn)
-            
-            inital_response = self.state.history[i].environment_observation[0].response.content
-            while True:
-                res = get_completion(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": REPEAT_PROMPT},
-                        {"role": "user", "content": f"Question: {q['question']}\n\nResponse 1: {inital_response}\nResponse 2: {response.content}"}
-                    ],
-                    reasoning_effort="low",
-                )
-                self.env_cost += completion_cost(res)
-                judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else "FALSE"
-                if judge in ["TRUE", "FALSE"]:
-                    break
-                logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
-            
-            self.repeat_results.append({
-                "question": f"Just to clarify, {q['question']}",
-                "original_response": inital_response,
-                "repeated_response": response.content,
-                "is_repeat": judge
-            })
-            self.repeat_score += (judge=='TRUE')
-        self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
-        return self.state
-        
-    
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result={
@@ -498,49 +383,41 @@ class InterrogationEnv:
                 "consistency": self.con_cnt / (self.con_cnt + self.incon_cnt) if (self.con_cnt + self.incon_cnt) > 0 else 0,
                 "confirmed_results": self.confirmed_results
             },
-            "internal_consistency": {
-                "first_conflict_turn": self.first_conflict_turn,
-                "conflict_pairs_count": self.internal_conflict_pairs_cnt,
-                "conflict_pairs": self.internal_conflict_pairs,
-                "total_pairs_evaluated": self.total_pairs_evaluated,
-                "conflict_rate": self.internal_conflict_pairs_cnt / self.total_pairs_evaluated if self.total_pairs_evaluated > 0 else 0
-            },
-            "repeat":{
-                "repeat_score": self.repeat_score,
-                "repeat_results": self.repeat_results
-            }
         }
         write_json(final_result, path)
         
         logging.info(f"Saving final result to {path}")
         logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
-        logging.info(f"First conflict turn: {final_result['internal_consistency']['first_conflict_turn']}")
-        logging.info(f"External consistency: {final_result['external_consistency']['consistency']}")
-        logging.info(f"Internal consistency: {final_result['internal_consistency']['conflict_rate']}")
         
 
 if __name__ == "__main__":
     from src.utils import setup_logging
+    from argparse import ArgumentParser
     setup_logging(log_to_file=True, process_name="test_env")
     load_dotenv()
-    
-    env = InterrogationEnv(
+
+    parser = ArgumentParser(description="Questioner Test Environment")
+    parser.add_argument("--model", type=str, default="gpt-5", help="Model to use")
+    args = parser.parse_args()
+
+    env = QuestionerTestEnv(
+        model=args.model,
         baseline_name="characterai",
         character_id="6HhWfeDjetnxESEcThlBQtEUo0O8YHcXyHqCgN7b2hY", # example character id
-        user_id="YOUR_USER_ID",
+        user_id=os.environ.get('CAI_API_KEY'),
         name="Elon Musk",
         tools={
             "google_claim_search": GoogleClaimSearch(
-                api_key='YOUR_API_KEY',
-                cx='YOUR_CX'
+                api_key=os.environ.get('GOOGLE_CLAIM_SEARCH'),
+                cx=os.environ.get('GOOGLE_CX_ID')
             ),
-            "google_geocode_validate": GoogleGeocodeValidate(api_key='YOUR_API_KEY')
+            "google_geocode_validate": GoogleGeocodeValidate(api_key=os.environ.get('GOOGLE_GEOCODE'))
         },
-        max_turns=30
+        max_turns=30,
+        nhd_model=args.model
     )
     state = env.reset()
     done = False
     while not done:
         state, done = env.step()
-    state = env.finalize()
-    env.save_state("interrogation_history.json")
+    env.save_state(f"data/prompt_engineering/questioner/questioner_test_history_{time.strftime('%Y%m%d_%H%M%S')}.json")

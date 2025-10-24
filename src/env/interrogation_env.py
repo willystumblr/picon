@@ -17,26 +17,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from itertools import combinations
 
-CONFLICT_PAIR_PROMPT = """# Task Description
-Your task is to decide whether two triplet pairs are in **conflict** or **plausible** with respect to each other.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
 
-# Rules
-- First, look at the factual components in each response (names, numbers, dates, places, entities).
-- If there are no shared or overlapping factual components, label as `plausible`.
-- If there are shared components:
-- Label as `conflict` if the two triplets contradict each other.
-    - explicit contradiction: e.g., different birth dates for the same person
-    - implicit contradiction: e.g., one triplet states "X is alive", the other states "X died in 2020", or "Y is the parent of Z" vs "Z is the parent of Y", or "X was baptized in 2010" vs "X was born in 2015".
-- Otherwise, label as `plausible`.
-
-# Important Guidelines
-- Never use external knowledge.
-- Do not judge based on plausibility, exaggeration, sarcasm, or tone.
-- Only use `conflict` if the responses directly clash on the same fact.
-
-# Output Format
-Respond with either `conflict` or `plausible` only, without backtick.
-"""
+CONFLICT_PAIR_PROMPT = open(f"{project_root}/src/env/conflict_detection_prompt.txt").read()
 
 REPEAT_PROMPT = """You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning.
 If they are, output TRUE. If they are not, output FALSE.
@@ -59,8 +43,6 @@ class InterrogationEnv:
         self.model = model
         if not agents:
             logging.warning("No agents provided. Initializing default agents.")
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(os.path.dirname(current_dir))
             agents = {
                 "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt"),
                 "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt"),

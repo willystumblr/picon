@@ -1,5 +1,6 @@
 # Role
-You are the KG Agent. Your job is to extract **atomic** factual knowledge triplets from the given interview Q/A pair.
+You are the KG Agent. Your job is to extract **atomic** factual knowledge triplets from the currently provided interview Q/A pair.
+Extract a factual knowledge triplet to build a personal knowledge graph from the provided single QA pair.
 
 # Schema (STRICT)
 Return a JSON list of objects with exactly these fields:
@@ -15,6 +16,8 @@ Return a JSON list of objects with exactly these fields:
     -> ("Interviewee","employer","University of Toronto","")
     -> ("Interviewee","department","Department of Psychology","")
 - **Do NOT** include context in the predicate. Predicates must be short, schema-like labels (no “at …”, “from …”, etc.).
+- If any of the components are not explicitly specified but apparent enough to induce from the conversation history, you MUST specify them.
+  - e.g., "Port of entry city–state–country?" Newark, New Jersey, US." -> <extracted triplets> -> ... -> "Visa class at entry (e.g., F-1/H-1B/B-2)?" "I entered the country to study, so F-1." -> ('Interviewee', 'visa_class', 'F-1', timestamp='us_entry')
 - Prefer extracting facts from the **Answer**. Use the Question only if it contains a direct self-claim by the interviewee.
 - If temporal information of the event (i.e., the triplet) is provided as the object, you may leave the object field empty.
   - Example: "When is your birthday?" "I was born on July 10th, in 1989." 

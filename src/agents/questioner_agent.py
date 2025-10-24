@@ -36,18 +36,6 @@ class QuestionerAgent(Agent):
             self.memory.append(kwargs) # typically role and content
 
     def act(self, conflict_pairs: List = [], confirmed_results: List = []) -> Action:
-        # if observation.observation_type == "tool_output":
-        #     assert 'tool_calls' in self.memory[-1] and self.memory[-1]['tool_calls'] is not None, "Last memory entry must be a tool call."
-        #     for tool_output in observation.tool_output:
-        #         idx = next((i for i, entry in enumerate(self.memory) if 'tool_calls' in entry and entry['tool_calls'] is not None and any(tc['id'] == tool_output.tool_call_id for tc in entry['tool_calls'])), None)
-        #         if idx is not None:
-        #             self.update_memory(
-        #                 role="tool",
-        #                 tool_call_id=tool_output.tool_call_id,
-        #                 name=tool_output.tool_name,
-        #                 content=str(tool_output.output),
-        #                 index=idx+1 # insert right after the tool call
-        #             )
         if conflict_pairs or confirmed_results:
             if not conflict_pairs:
                 conflict_pairs = ["No conflicting QA pairs identified so far."]
@@ -67,6 +55,7 @@ class QuestionerAgent(Agent):
             reasoning_effort="low"
         )
         self._calculate_cost(res)
+        logging.info(f"[REASONING TRACE] {self.role} {res.choices[0].message.reasoning_content}")
         question = res.choices[0].message.content.strip()
         self.update_memory(role="assistant", content=question)
         return Action(agent=self.role, action_type="respond", content=question)

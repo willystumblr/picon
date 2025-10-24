@@ -170,8 +170,15 @@ class InterrogationEnv:
         return self.state
 
     async def check_external(self, message : str) -> bool:
+        curr_triplets = self.agents['kg_agent'].kg # all previously extracted triplets
+        
+        #breakpoint()
         # 1. Extractor first extracts the entity & claim to verify
         next_action = self.agents["extractor"].act(message)
+        if len(curr_triplets)==0:
+            return next_action, None, [], []
+        curr_triplets = [str(triplet) for triplet in curr_triplets]
+        triplet_content = "Triplet List : \n" + "\n".join(curr_triplets)
         logging.info(f"[ACTION] Extractor: {next_action.action_type} - {next_action.content if next_action.content else next_action.target_agent}")
         if next_action.action_type == "next_agent":
             if next_action.target_agent != "questioner":
@@ -271,17 +278,20 @@ class InterrogationEnv:
                                 messages=[
                                     {
                                         "role": "system",
-                                        "content": (f"Today’s date : {self.cutoff_date}\n\nBased on the question-answer pair from the interviewee and the search results, "
-                                                    "generate a final verdict if the interviewee's original answer is plausible and compatible (i.e., consistent) with the search results. "
-                                                    "Respond with 'yes' if it is; 'no' otherwise. If the search results are irrelevant, respond with 'yes'.")
+                                        "content": (f"Today’s date: {self.cutoff_date}\n\n"
+                                                "Based on the triplets extracted from the interviewee’s response and the search results, make a final judgment on whether the triplets are plausible and compatible (i.e., consistent) with the search results.) "
+                                                "Respond with 'yes' if one or more triplets contradict the search results; otherwise, respond with 'no'. "
+                                                "You may also determine contradictions by considering multiple triplets collectively. "
+                                                "If the search results are unrelated to any of the triplets, respond with 'yes'.")
                                     },
                                     {
                                         "role": "user",
-                                        "content": f"Original QA: {message}\nSearch Result: {str(output.output)}"
+                                        "content": f"Triplets: {triplet_content}\nSearch Result: {str(output.output)}"
                                     }
                                 ],
                                 reasoning_effort="low",
                             )
+                            logging.info("triplet_content: "+triplet_content)
                             self.env_cost += completion_cost(res)
                             if res and res.choices and res.choices[0].message and res.choices[0].message.content:
                                 final_verdict = res.choices[0].message.content.strip().lower()
@@ -310,28 +320,16 @@ class InterrogationEnv:
 
     async def check_internal(self, question: str, answer : str) -> bool:
         conflict_count = 0
-        # pair_format = "Question 1: {question_1}\nResponse 1: {response_1}\n\nQuestion 2: {question_2}\nResponse 2: {response_2}"
-        pair_format = "Triplet 1: {triplet_1} \n\nTriplet 2: {triplet_2}"
-        # prev_qas = [(turn.environment_observation[-1].response.question, turn.environment_observation[-1].response.content) for turn in self.state.history[:-1]]
-        triplets_res = self.agents['kg_agent'].act(f"Question: {question}\nResponse: {answer}")
-        triplets_2 = triplets_res.content
-        if not triplets_2:
-            logging.warning(f"[ACTION] KG Agent: {triplets_res.action_type} - No triplets found")
+
+        curr_triplets = self.agents['kg_agent'].kg # all previously extracted triplets
+        if len(curr_triplets)==0:
             return conflict_count, []
-        logging.info(f"[ACTION] KG Agent: {triplets_res.action_type} - {triplets_res.content if triplets_res.content is not None else triplets_res.tool_call.tool_name}")
-        prev_triplets = self.agents['kg_agent'].kg[:-len(triplets_2)] # all previously extracted triplets
-        content_list = []
-        for triplet_2 in triplets_2:
-            content_list.extend([pair_format.format(
-                triplet_1=triplet, triplet_2=triplet_2
-            ) for triplet in prev_triplets])
-        # Create combinations within the response triplets_2:
-        combinations_within_response = combinations(triplets_2, 2)
-        for triplet_1, triplet_2 in combinations_within_response:
-            content_list.append(pair_format.format(
-                triplet_1=triplet_1, triplet_2=triplet_2
-            ))
-        messages_list = [[
+        
+        #breakpoint()
+        curr_triplets = [str(triplet) for triplet in curr_triplets]
+        content = "Triplet List : \n" + "\n".join(curr_triplets)
+
+        message = [
             {
                 "role": "system",
                 "content": CONFLICT_PAIR_PROMPT
@@ -340,32 +338,39 @@ class InterrogationEnv:
                 "role": "user",
                 "content": content
             }
-        ] for content in content_list]
+        ]
         conflict_pairs = []
         logging.info("Using sequential processing for conflict pair evaluation.")
-        logging.info(f"Total pairs to evaluate: {len(messages_list)}")
+        logging.info(f"Total triplets: {len(curr_triplets)}")
         logging.info(f"Using model: {self.model}")
         logging.info("This may take a while...")
         with ThreadPoolExecutor(max_workers=32) as executor: # using tqdm for progress bar
-            results = list(tqdm(executor.map(lambda msg: get_completion(model=self.model, messages=msg), messages_list), total=len(messages_list), desc="Evaluating Conflict Pairs"))
-            if isinstance(self.first_conflict_turn, bool) and not self.first_conflict_turn and any(res and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() == 'conflict' for res in results):
+            res = get_completion(model=self.model, messages=message) 
+            if isinstance(self.first_conflict_turn, bool) and not self.first_conflict_turn and res and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() == 'conflict':
                 self.first_conflict_turn = self.state.current_turn
                 logging.info(f"First conflict detected at turn {self.state.current_turn}.")
-        self.total_pairs_evaluated += len(results)
-        for i, res in enumerate(results):
-            if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
-                logging.warning(f"Unexpected response: {res}")
-                continue
+        #self.total_pairs_evaluated += len(results)
+        #for i, res in enumerate(results):
+        if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
+            logging.warning(f"Unexpected response: {res}")
+        else:
             self.env_cost += completion_cost(res)
             if res.choices[0].message.content.strip() == "conflict":
                 conflict_count += 1
-                conflict_pairs.append(content_list[i])
+                #conflict_pairs.append(content_list[i])
 
         return conflict_count, conflict_pairs
     
     async def consistency_check(self, question: str, answer : str):
         message = f"Question:{question}\nResponse: {answer}" # find interviewee_response (first index)
         
+        triplets_res = self.agents['kg_agent'].act(f"Question: {question}\nResponse: {answer}")
+        triplets_2 = triplets_res.content
+        if not triplets_2:
+            logging.warning(f"[ACTION] KG Agent: {triplets_res.action_type} - No triplets found")
+            return None, None, [], [], []
+        logging.info(f"[ACTION] KG Agent: {triplets_res.action_type} - {triplets_res.content if triplets_res.content is not None else triplets_res.tool_call.tool_name}")
+
         # internal consistency check
         conflict_count, conflict_pairs = await self.check_internal(question, answer)
         self.internal_conflict_pairs_cnt += conflict_count

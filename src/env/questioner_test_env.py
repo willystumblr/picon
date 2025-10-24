@@ -60,11 +60,6 @@ class QuestionerTestEnv:
         self.start_time = time.time()
         self.env_cost = 0.0
 
-        # internal 
-        # self.internal_conflict_pairs_cnt = 0
-        # self.internal_conflict_pairs = []
-        # self.total_pairs_evaluated = 0
-        # self.first_conflict_turn = False
         
         # external
         self.con_cnt = 0
@@ -224,73 +219,6 @@ class QuestionerTestEnv:
                     logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
                     response = self.interviewee.get_response(confirmation_question)
                     logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
-                    content = f"Question: {confirmation_question}\nInterviewee's Response: {response.content}"
-                    res = get_completion(
-                        model=self.model,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": "Determine if the interviewee’s response confirms that the web search results match what they said. Respond with 'yes' if confirmed, 'no' otherwise."
-                            },
-                            {
-                                "role": "user",
-                                "content": content
-                            }
-                        ],
-                        reasoning_effort="low",
-                    )
-                    self.env_cost += completion_cost(res)
-                    confirmed = res.choices[0].message.content.strip().lower()
-                    confirmed_result = {
-                        "claim": filtered_actions[i].tool_call.arguments.get('claim', ''),
-                        "original_qa": message,
-                        "content": str(output.output),
-                        "confirmation_qa": content,
-                    }
-                    if confirmed == 'yes':
-                        if any([s in str(output.output) for s in ["[content-extraction-failed]", "Search failure:", "No text could be extracted from the top results.", "[Error fetching]"]]):
-                            self.con_cnt += 1
-                            confirmed_result["is_confirmed"] = True
-                            confirmed_result["external_verdict"] = True
-                            confirmed_results.append(confirmed_result)
-                            continue
-                        while True:
-                            res = get_completion(
-                                model=self.model,
-                                messages=[
-                                    {
-                                        "role": "system",
-                                        "content": (f"Today’s date : {self.cutoff_date}\n\nBased on the question-answer pair from the interviewee and the search results, "
-                                                    "generate a final verdict if the interviewee's original answer is plausible and compatible (i.e., consistent) with the search results. "
-                                                    "Respond with 'yes' if it is; 'no' otherwise. If the search results are irrelevant, respond with 'yes'.")
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": f"Original QA: {message}\nSearch Result: {str(output.output)}"
-                                    }
-                                ],
-                                reasoning_effort="low",
-                            )
-                            self.env_cost += completion_cost(res)
-                            if res and res.choices and res.choices[0].message and res.choices[0].message.content:
-                                final_verdict = res.choices[0].message.content.strip().lower()
-                                if final_verdict in ['yes', 'no']:
-                                    break
-                        if final_verdict == 'yes':
-                            self.con_cnt += 1
-                            confirmed_result["is_confirmed"] = True
-                            confirmed_result["external_verdict"] = True
-                            confirmed_results.append(confirmed_result)
-                        else:
-                            self.incon_cnt += 1
-                            confirmed_result["is_confirmed"] = True
-                            confirmed_result["external_verdict"] = False
-                            confirmed_results.append(confirmed_result)
-                    else:
-                        self.unknown_cnt += 1
-                        confirmed_result["is_confirmed"] = False
-                        confirmed_result["external_verdict"] = False
-                        confirmed_results.append(confirmed_result)
             else:
                 observation = None
                 filtered_actions = []
@@ -375,13 +303,6 @@ class QuestionerTestEnv:
             "history": [obj.model_dump() for obj in self.state.history],
             "agent_memory": {
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
-            },
-            "external_consistency": {
-                "consistent": self.con_cnt,
-                "inconsistent": self.incon_cnt,
-                "unknown": self.unknown_cnt,
-                "consistency": self.con_cnt / (self.con_cnt + self.incon_cnt) if (self.con_cnt + self.incon_cnt) > 0 else 0,
-                "confirmed_results": self.confirmed_results
             },
         }
         write_json(final_result, path)

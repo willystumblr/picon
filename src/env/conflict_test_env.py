@@ -40,6 +40,9 @@ class ConflictTestEnv:
     def reset(self):
         """reset the environment"""
         self.state = State(current_turn=1, history=[])
+        logging.info("Environment reset.")
+        logging.info(f"Total turns to process: {len(self.triplet_list_per_turn)}")
+        logging.info(f"Total triplets: {len(self.kg)}")
         return self.state
     
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
@@ -48,7 +51,7 @@ class ConflictTestEnv:
             logging.info("All triplets have been processed.")
             return self.state, True  # done
         
-        curr_triplets = self.kg[self.state.current_turn]
+        curr_triplets = self.triplet_list_per_turn[self.state.current_turn]
         if not curr_triplets:
             logging.info(f"[TURN {self.state.current_turn}] No triplets extracted.")
             self.state.current_turn += 1
@@ -58,6 +61,7 @@ class ConflictTestEnv:
         flattened_triplets = []
         for triplet_list in triplet_lists:
             flattened_triplets.extend(triplet_list)
+        flattened_triplets.extend(curr_triplets)
         flattened_triplets = [str(triplet) for triplet in flattened_triplets]
         content = "Triplet List : \n" + "\n".join(flattened_triplets)
         message = [
@@ -80,7 +84,9 @@ class ConflictTestEnv:
         else:
             self.env_cost += completion_cost(res)
             verdict = res.choices[0].message.content.lower()
-            if "conflict" in verdict:
+            if verdict=='conflict':
+                if isinstance(self.first_conflict_turn, bool) and not self.first_conflict_turn:
+                    self.first_conflict_turn = self.state.current_turn
                 self.internal_conflict_cnt += 1
                 self.internal_conflict_indices.append(self.state.current_turn)
                 logging.info(f"[CONFLICT DETECTION] Conflict detected at turn {self.state.current_turn}.")

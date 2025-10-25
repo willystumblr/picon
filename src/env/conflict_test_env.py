@@ -31,10 +31,10 @@ class ConflictTestEnv:
         data = read_json(kg_path)
         self.qa_pairs = [item['environment_observation'][-1]['response'] for item in data['history'] if item['environment_observation'] and item['environment_observation'][-1]['observation_type'] == 'interviewee_response']
         self.kg = data.get('interviewee_kg', [])
+        self.triplet_list_per_turn = [item["agent_action"][0]["content"] for item in data['history']]
 
-        self.internal_conflict_pairs_cnt = 0
-        self.internal_conflict_pairs = []
-        self.total_pairs_evaluated = 0
+        self.internal_conflict_cnt = 0
+        self.internal_conflict_indices = []
         self.first_conflict_turn = False
 
     def reset(self):
@@ -44,18 +44,23 @@ class ConflictTestEnv:
     
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation"""
-        if self.state.current_turn >= len(self.kg):
+        if self.state.current_turn >= len(self.triplet_list_per_turn):
             logging.info("All triplets have been processed.")
             return self.state, True  # done
-        current_triplets = self.kg[self.state.current_turn]
-        combinations_to_check = [(t1, current_triplets) for t1 in self.kg[:self.state.current_turn]]
-        pair_format = "Triplet 1: {triplet_1} \n\nTriplet 2: {triplet_2}"
-        content_list = []
-        for triplet_1, triplet_2 in combinations_to_check:
-            content_list.append(pair_format.format(
-                triplet_1=triplet_1, triplet_2=triplet_2
-            ))
-        messages_list = [[
+        
+        curr_triplets = self.kg[self.state.current_turn]
+        if not curr_triplets:
+            logging.info(f"[TURN {self.state.current_turn}] No triplets extracted.")
+            self.state.current_turn += 1
+            return self.state, False
+        logging.info(f"[TURN {self.state.current_turn}] Triplets extracted: {curr_triplets}")
+        triplet_lists = self.triplet_list_per_turn[:self.state.current_turn]
+        flattened_triplets = []
+        for triplet_list in triplet_lists:
+            flattened_triplets.extend(triplet_list)
+        flattened_triplets = [str(triplet) for triplet in flattened_triplets]
+        content = "Triplet List : \n" + "\n".join(flattened_triplets)
+        message = [
             {
                 "role": "system",
                 "content": self.conflict_prompt
@@ -64,35 +69,21 @@ class ConflictTestEnv:
                 "role": "user",
                 "content": content
             }
-        ] for content in content_list]
+        ]
         logging.info("Using sequential processing for conflict pair evaluation.")
-        logging.info(f"Total pairs to evaluate: {len(messages_list)}")
+        logging.info(f"Total triplets: {len(flattened_triplets)}")
         logging.info(f"Using model: {self.model}")
         logging.info("This may take a while...")
-        with ThreadPoolExecutor(max_workers=32) as executor:
-            verdicts = list(tqdm(executor.map(
-                lambda messages: get_completion(
-                    model=self.model,
-                    messages=messages,
-                    temperature=1.0
-                ),
-                messages_list
-            )))
-        self.total_pairs_evaluated += len(verdicts)
-        conflict_pairs = []
-        for idx, verdict in enumerate(verdicts):
-            self.env_cost += completion_cost(verdict)
-            response_text = verdict.choices[0].message.content.lower()
-            if "conflict" in response_text:
-                conflict_pairs.append(content_list[idx])
-        logging.info(f"[CONFLICT DETECTION] Detected {len(conflict_pairs)} conflicting pairs in total.")
-        if len(conflict_pairs) > 0:
-            if not self.first_conflict_turn:
-                self.first_conflict_turn = self.state.current_turn
-            self.internal_conflict_pairs_cnt += len(conflict_pairs)
-            self.internal_conflict_pairs.extend(conflict_pairs)
-            for pair in conflict_pairs:
-                logging.info(f"[CONFLICT DETECTION] Conflicting Pair:\n{pair}\n")
+        res = get_completion(model=self.model, messages=message)
+        if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
+            logging.warning(f"Unexpected response: {res}")
+        else:
+            self.env_cost += completion_cost(res)
+            verdict = res.choices[0].message.content.lower()
+            if "conflict" in verdict:
+                self.internal_conflict_cnt += 1
+                self.internal_conflict_indices.append(self.state.current_turn)
+                logging.info(f"[CONFLICT DETECTION] Conflict detected at turn {self.state.current_turn}.")
         self.state.current_turn += 1
         return self.state, False
         
@@ -106,11 +97,12 @@ class ConflictTestEnv:
             "history": [obj.model_dump() for obj in self.state.history],
             "internal_consistency": {
                 "first_conflict_turn": self.first_conflict_turn,
-                "conflict_pairs_count": self.internal_conflict_pairs_cnt,
-                "conflict_pairs": self.internal_conflict_pairs,
-                "total_pairs_evaluated": self.total_pairs_evaluated,
-                "conflict_rate": self.internal_conflict_pairs_cnt / self.total_pairs_evaluated if self.total_pairs_evaluated > 0 else 0
-            },
+                "conflict_pairs_count": self.internal_conflict_cnt,
+                "conflict_turns": self.internal_conflict_indices,
+                "conflict_triplets_accumulated":{
+                    idx: self.triplet_list_per_turn[:idx+1] for idx in self.internal_conflict_indices
+                }
+                },
         }
         write_json(final_result, path)
         

@@ -264,6 +264,7 @@ class InterrogationEnv:
                         "original_qa": message,
                         "content": str(output.output),
                         "confirmation_qa": content,
+                        "triplets": triplet_content
                     }
                     if confirmed == 'yes':
                         if any([s in str(output.output) for s in ["[content-extraction-failed]", "Search failure:", "No text could be extracted from the top results.", "[Error fetching]"]]):
@@ -282,7 +283,7 @@ class InterrogationEnv:
                                                 "Based on the triplets extracted from the interviewee’s response and the search results, make a final judgment on whether the triplets are plausible and compatible (i.e., consistent) with the search results.) "
                                                 "Respond with 'yes' if one or more triplets contradict the search results; otherwise, respond with 'no'. "
                                                 "You may also determine contradictions by considering multiple triplets collectively. "
-                                                "If the search results are unrelated to any of the triplets, respond with 'yes'.")
+                                                "If the search results are unrelated to any of the triplets (a.k.a topic mismatch), respond with 'yes'.")
                                     },
                                     {
                                         "role": "user",
@@ -322,7 +323,7 @@ class InterrogationEnv:
         conflict_count = 0
 
         curr_triplets = self.agents['kg_agent'].kg # all previously extracted triplets
-        if len(curr_triplets)==0:
+        if len(curr_triplets)==0 :
             return conflict_count, []
         
         #breakpoint()
@@ -349,7 +350,7 @@ class InterrogationEnv:
             if isinstance(self.first_conflict_turn, bool) and not self.first_conflict_turn and res and res.choices and res.choices[0].message and res.choices[0].message.content and res.choices[0].message.content.strip() == 'conflict':
                 self.first_conflict_turn = self.state.current_turn
                 logging.info(f"First conflict detected at turn {self.state.current_turn}.")
-        #self.total_pairs_evaluated += len(results)
+        self.total_pairs_evaluated += 1
         #for i, res in enumerate(results):
         if not res or not res.choices or not res.choices[0].message or not res.choices[0].message.content or res.choices[0].message.content.strip() not in ['plausible', 'conflict']:
             logging.warning(f"Unexpected response: {res}")
@@ -363,7 +364,7 @@ class InterrogationEnv:
     
     async def consistency_check(self, question: str, answer : str):
         message = f"Question:{question}\nResponse: {answer}" # find interviewee_response (first index)
-        
+    
         triplets_res = self.agents['kg_agent'].act(f"Question: {question}\nResponse: {answer}")
         triplets_2 = triplets_res.content
         if not triplets_2:
@@ -398,9 +399,10 @@ class InterrogationEnv:
         
         # 3. Questioner formulates the next question
         # two scenarios: (1) from extractor directly (hence generating from interviewee's response directly), (2) from web search
-        
         final_action = self.agents['questioner'].act() ####### 여기 #######
-    
+        if not next_action:
+            next_action = final_action    
+            
         logging.info(f"[ACTION] Questioner: {final_action.action_type} - {final_action.content if final_action.content else final_action.tool_call.tool_name}")
         if final_action.action_type != "respond" or final_action.content is None:
             logging.error("Questioner must respond with a question.")
@@ -415,6 +417,7 @@ class InterrogationEnv:
         # update state
         self.agents['questioner'].update_memory(role="user", content=response.content)
         self.state.current_turn += 1
+        
         turn = Turn(
             type='main_interrogation',
             agent_action=[next_action, final_action],

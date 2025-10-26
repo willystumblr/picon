@@ -70,7 +70,8 @@ class QuestionerTestEnv:
         # repeat
         self.repeat_score = 0
         self.repeat_results = []
-    
+        
+        self.human_interviewer = kwargs.get("human_interviewer", False)
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -133,7 +134,11 @@ class QuestionerTestEnv:
                 ))
                 
         self.agents['extractor'].memory[0]['content'] = self.agents['extractor'].memory[0]['content']+f"QA History: {qa_history}"
-        question = self.agents['questioner'].act() ####### 여기 #######
+        if self.human_interviewer:
+            question_text = input("Enter your question for the interviewee: ")
+            question = Action(action_type="respond", content=question_text)
+        else:
+            question = self.agents['questioner'].act() ####### 여기 #######
         logging.info(f"[ACTION] Questioner: {question.action_type} - {question.content if question.content else question.tool_call.tool_name}")
         logging.info(f"[FIRST QUESTION] {question.content}")
         response = self.interviewee.get_response(question.content)
@@ -254,8 +259,11 @@ class QuestionerTestEnv:
         
         # 3. Questioner formulates the next question
         # two scenarios: (1) from extractor directly (hence generating from interviewee's response directly), (2) from web search
-        
-        final_action = self.agents['questioner'].act() ####### 여기 #######
+        if self.human_interviewer:
+            question_text = input("Enter your question for the interviewee: ")
+            final_action = Action(action_type="respond", content=question_text)
+        else:
+            final_action = self.agents['questioner'].act()
     
         logging.info(f"[ACTION] Questioner: {final_action.action_type} - {final_action.content if final_action.content else final_action.tool_call.tool_name}")
         if final_action.action_type != "respond" or final_action.content is None:
@@ -320,6 +328,7 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Questioner Test Environment")
     parser.add_argument("--model", type=str, default="gpt-5", help="Model to use")
     parser.add_argument("--max_turns", type=int, default=30, help="Maximum number of turns")
+    parser.add_argument("--human_interviewer", action="store_true", help="Use human simulacra as interviewer")
     args = parser.parse_args()
 
     env = QuestionerTestEnv(
@@ -336,7 +345,8 @@ if __name__ == "__main__":
             "google_geocode_validate": GoogleGeocodeValidate(api_key=os.environ.get('GOOGLE_GEOCODE'))
         },
         max_turns=args.max_turns,
-        nhd_model=args.model
+        nhd_model=args.model,
+        human_interviewer=args.human_interviewer
     )
     state = env.reset()
     done = False

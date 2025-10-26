@@ -78,6 +78,8 @@ class InterrogationEnv:
         self.con_cnt = 0
         self.incon_cnt = 0
         self.unknown_cnt = 0
+        self.total_confirmations = 0
+        self.confirmed_answers = 0
         self.confirmed_results = []
         
         # repeat
@@ -258,12 +260,15 @@ class InterrogationEnv:
                         "content": str(output.output),
                         "confirmation_qa": content,
                     }
+                    self.total_confirmations += 1
                     if confirmed == 'yes':
+                        self.confirmed_answers += 1
                         confirmed_result["is_confirmed"] = True
                     else:
                         self.unknown_cnt += 1
+                        confirmed_result['confirmed_message'] = confirmed
                         confirmed_result["is_confirmed"] = False
-                        confirmed_results.append(confirmed_result)
+                    confirmed_results.append(confirmed_result)
             else:
                 observation = None
                 filtered_actions = []
@@ -454,6 +459,7 @@ class InterrogationEnv:
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
             "external_consistency": {
+                "confirmed_rate": self.confirmed_answers / self.total_confirmations if self.total_confirmations > 0 else 0,
                 "confirmed_results": self.confirmed_results
             },
             "internal_consistency": {
@@ -473,7 +479,7 @@ class InterrogationEnv:
         logging.info(f"Saving final result to {path}")
         logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
         logging.info(f"First conflict turn: {final_result['internal_consistency']['first_conflict_turn']}")
-        logging.info(f"External consistency: {final_result['external_consistency']['consistency']}")
+        logging.info(f"External confirm rate: {final_result['external_consistency']['confirmed_rate']}")
         logging.info(f"Internal consistency: {final_result['internal_consistency']['conflict_rate']}")
         
 

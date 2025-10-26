@@ -259,48 +259,10 @@ class InterrogationEnv:
                         "confirmation_qa": content,
                     }
                     if confirmed == 'yes':
-                        if any([s in str(output.output) for s in ["[content-extraction-failed]", "Search failure:", "No text could be extracted from the top results.", "[Error fetching]"]]):
-                            self.con_cnt += 1
-                            confirmed_result["is_confirmed"] = True
-                            confirmed_result["external_verdict"] = True
-                            confirmed_results.append(confirmed_result)
-                            continue
-                        while True:
-                            res = get_completion(
-                                model=self.model,
-                                messages=[
-                                    {
-                                        "role": "system",
-                                        "content": (f"Today’s date : {self.cutoff_date}\n\nBased on the question-answer pair from the interviewee and the search results, "
-                                                    "generate a final verdict if the interviewee's original answer is plausible and compatible (i.e., consistent) with the search results. "
-                                                    "Respond with 'yes' if it is; 'no' otherwise. If the search results are irrelevant, respond with 'yes'.")
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": f"Original QA: {message}\nSearch Result: {str(output.output)}"
-                                    }
-                                ],
-                                reasoning_effort="low",
-                            )
-                            self.env_cost += completion_cost(res)
-                            if res and res.choices and res.choices[0].message and res.choices[0].message.content:
-                                final_verdict = res.choices[0].message.content.strip().lower()
-                                if final_verdict in ['yes', 'no']:
-                                    break
-                        if final_verdict == 'yes':
-                            self.con_cnt += 1
-                            confirmed_result["is_confirmed"] = True
-                            confirmed_result["external_verdict"] = True
-                            confirmed_results.append(confirmed_result)
-                        else:
-                            self.incon_cnt += 1
-                            confirmed_result["is_confirmed"] = True
-                            confirmed_result["external_verdict"] = False
-                            confirmed_results.append(confirmed_result)
+                        confirmed_result["is_confirmed"] = True
                     else:
                         self.unknown_cnt += 1
                         confirmed_result["is_confirmed"] = False
-                        confirmed_result["external_verdict"] = False
                         confirmed_results.append(confirmed_result)
             else:
                 observation = None
@@ -492,10 +454,6 @@ class InterrogationEnv:
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
             "external_consistency": {
-                "consistent": self.con_cnt,
-                "inconsistent": self.incon_cnt,
-                "unknown": self.unknown_cnt,
-                "consistency": self.con_cnt / (self.con_cnt + self.incon_cnt) if (self.con_cnt + self.incon_cnt) > 0 else 0,
                 "confirmed_results": self.confirmed_results
             },
             "internal_consistency": {

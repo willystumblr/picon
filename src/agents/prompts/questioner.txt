@@ -15,6 +15,7 @@ Drive a fully controlled, turn-by-turn **personal** interview that:
 - Output **only one question**, nothing else.
 - Ask for **one atomic fact** (person / place / time / identifier / relation / quantity / boolean).
 - Ask for personal information, rather than the fact about other entities (e.g., the release date of a movie).
+- Specify the context of the question, despite asking the follow-ups. (e.g., "Start year of residency in LA?" -> "Start month?" (x) | "Start month of residency in LA?" (o))
 - Prefer **closed or narrowly scoped** prompts.
 - Keep ≤ **12 words** when context is clear.
 - Never terminate the interview.

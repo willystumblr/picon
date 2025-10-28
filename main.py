@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument('--entity_extractor_prompt_path', type=str, default='src/agents/prompts/entity_extractor.txt', help='Path to the entity extractor agent prompt file.')
     parser.add_argument('--claim_extractor_prompt_path', type=str, default='src/agents/prompts/claim_extractor_prompt.txt', help='Path to the claim extractor agent prompt file.')
     parser.add_argument('--web_search_prompt_path', type=str, default='src/agents/prompts/websearch_prompt.txt', help='Path to the web search agent prompt file.')
-    parser.add_argument('--kg_agent_prompt_path', type=str, default='src/agents/prompts/kg_agent_prompt.txt', help='Path to the KG agent prompt file.')
+    parser.add_argument('--evaluator_prompt_path', type=str, default='src/agents/prompts/evaluator_prompt.txt', help='Path to the evaluator agent prompt file.')
     parser.add_argument('--use_claim_extractor', action='store_true', help='Whether to use the claim extractor agent instead of the entity extractor agent.')
     parser.add_argument('--output_dir', type=str, default='data/results', help='Directory to save the results.')
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
@@ -106,7 +106,7 @@ if __name__ == "__main__":
                     "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.model),
                     "extractor": get_agent("claim_extractor", args.claim_extractor_prompt_path, model=args.model) if args.use_claim_extractor else get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.model),
                     "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.model),
-                    "kg_agent": get_agent("kg_agent", args.kg_agent_prompt_path, model=args.model)
+                    "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.model),
                 },
                 tools=tools,
                 max_turns=args.num_turns,

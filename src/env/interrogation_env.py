@@ -47,7 +47,6 @@ class InterrogationEnv:
                 "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt"),
                 "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt"),
                 "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt"),
-                "kg_agent": get_agent("kg_agent", f"{project_root}/src/agents/prompts/kg_agent_prompt.txt", model=model),
                 "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=model),
             }
         self.agents = agents
@@ -120,8 +119,6 @@ class InterrogationEnv:
                 self.cutoff_date = response.content
                 self.agents['questioner'].set_cutoff_date(self.cutoff_date)
                 self.agents['web_search'].set_cutoff_date(self.cutoff_date)
-                init_triplet = self.agents['kg_agent'].act(f"The interviewee's cutoff date information {self.cutoff_date}.")
-                logging.info(f"[ACTION] KG Agent: {init_triplet.action_type} - {init_triplet.content if init_triplet.content is not None else init_triplet.tool_call.tool_name}")
             # update state
             action = Action(action_type="respond", content=q['question'])
             res_observation = Observation(
@@ -143,7 +140,10 @@ class InterrogationEnv:
                     answer=response.content
                 ))
                 self.score_conflict(verdict_action)
-                turn = Turn(type='get_to_know', agent_action=[entity_action, web_search_actions, verdict_action], environment_observation=[res_observation, web_observation])
+                if web_search_actions:
+                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions, verdict_action], environment_observation=[res_observation, web_observation])
+                else:
+                    turn = Turn(type='get_to_know', agent_action=[entity_action, verdict_action], environment_observation=[res_observation])
             else:
                 turn = Turn(type='get_to_know', agent_action=[action], environment_observation=[res_observation])
             self.state.history.append(turn)
@@ -171,7 +171,7 @@ class InterrogationEnv:
             history = []
             for turn in self.state.history:
                 # last element is interviewee response
-                qa_pair = turn.environment_observation[-1].response
+                qa_pair = turn.environment_observation[0].response
                 history.append({
                     "question": qa_pair.question,
                     "answer": qa_pair.content
@@ -237,17 +237,20 @@ class InterrogationEnv:
         entity_action, observation, web_search_actions = await self.check_external(message)
         verdict_action = self.agents['evaluator'].act() ####### 여기 #######
         
+        logging.info(f"[ACTION] Evaluator: {verdict_action.action_type} - {verdict_action.content if verdict_action.content else verdict_action.target_agent}")
+        
         return entity_action, observation, web_search_actions, verdict_action
     
     
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation"""
-        if self.state.current_turn > self.max_turns:
+        if self.state.current_turn >= self.max_turns:
             logging.warning("Max turns reached. Please reset the environment.")
             return self.state, True
         
         question_act = self.agents['questioner'].act()
         logging.info(f"[ACTION] Questioner: {question_act.action_type} - {question_act.content if question_act.content else question_act.tool_call.tool_name}")
+        self.agents['evaluator'].update_memory(role="assistant", content=question_act.content)
         interviewee_res = self.interviewee.get_response(question_act.content)
         logging.info(f"[RESPONSE] {self.interviewee.name}: {interviewee_res.content}")
         
@@ -263,7 +266,7 @@ class InterrogationEnv:
 
         self.state.current_turn += 1
 
-        actions = [question_act, entity_action, web_search_actions, verdict_action] if web_search_actions else [question_act, entity_action, verdict_action]
+        actions = [question_act, entity_action, *web_search_actions, verdict_action] if web_search_actions else [question_act, entity_action, verdict_action]
         res_ob = Observation(observation_type="interviewee_response", response=interviewee_res)
         observations = [res_ob, observation] if observation else [res_ob]
         turn = Turn(
@@ -277,15 +280,15 @@ class InterrogationEnv:
         return self.state, False
 
     def score_conflict(self, verdict_action: Action):
-        if verdict_action.content.ground == 'internal':
+        if verdict_action.content['ground'] == 'internal':
             self.internal_count += 1
-            if verdict_action.content.verdict == 'conflict':
+            if verdict_action.content['verdict'] == 'conflict':
                 self.internal_conflict += 1
             else:
                 self.internal_plausible += 1
         else:
             self.external_count += 1
-            if verdict_action.content.verdict == 'conflict':
+            if verdict_action.content['verdict'] == 'conflict':
                 self.external_conflict += 1
             else:
                 self.external_plausible += 1
@@ -362,7 +365,7 @@ class InterrogationEnv:
                 "total_evaluations": self.internal_count,
                 "conflict_count": self.internal_conflict,
                 "plausible_count": self.internal_plausible,
-                "consistency_rate": self.internal_plausible / self.internal_count if self.internal_countq > 0 else 0
+                "consistency_rate": self.internal_plausible / self.internal_count if self.internal_count > 0 else 0
             },
             "repeat":{
                 "repeat_score": self.repeat_score,
@@ -373,10 +376,9 @@ class InterrogationEnv:
         
         logging.info(f"Saving final result to {path}")
         logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
-        logging.info(f"First conflict turn: {final_result['internal_consistency']['first_conflict_turn']}")
-        logging.info(f"External confirm rate: {final_result['external_consistency']['confirmed_rate']}")
-        logging.info(f"Internal consistency: {final_result['internal_consistency']['conflict_rate']}")
-        
+        logging.info(f"External consistency: {final_result['external_consistency']['consistency_rate']}")
+        logging.info(f"Internal consistency: {final_result['internal_consistency']['consistency_rate']}")
+        logging.info(f"Repeat score: {final_result['repeat']['repeat_score']}")
 
 if __name__ == "__main__":
     from src.utils import setup_logging

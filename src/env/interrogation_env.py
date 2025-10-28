@@ -141,7 +141,9 @@ class InterrogationEnv:
             self.state.current_observation = observation
             self.state.current_turn += 1
             
+            self.agents['evaluator'].update_memory(role="assistant", content=q['question'])
             self.agents['questioner'].update_memory(role="assistant", content=q['question'])
+            self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
             qa_history += f"Q: {q['question']}\nA: {response.content}\n"
             if i > 0:
@@ -214,11 +216,7 @@ class InterrogationEnv:
                 # confirmation questions
                 confirmed_results = []
                 for i, output in enumerate(tool_outputs):
-                    messages = [
-                        {
-                            "role": "system",
-                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results, e.g., \"Based on the search result, Google is ... Is the company what you meant? Please respond with 'yes' or 'no'.\""
-                        },
+                    sub_message = [
                         filtered_actions[i].tool_call.details,
                         {
                             "role": "tool",
@@ -227,6 +225,16 @@ class InterrogationEnv:
                             "content": str(output.output)
                         }
                     ]
+                    """tool call 결과를 evaluator 메모리에 추가"""
+                    self.agents['evaluator'].update_memory(**sub_message[0]) ####### 여기 #######
+                    self.agents['evaluator'].update_memory(**sub_message[1]) ####### 여기 #######
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results, e.g., \"Based on the search result, Google is ... Is the company what you meant? Please respond with 'yes' or 'no'.\""
+                        },
+                    ]
+                    messages.extend(sub_message)
                     res = get_completion(
                         model=self.model,
                         messages=messages,
@@ -237,6 +245,10 @@ class InterrogationEnv:
                     logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
                     response = self.interviewee.get_response(confirmation_question)
                     logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
+                    
+                    self.agents['evaluator'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
+                    self.agents['evaluator'].update_memory(role="user", content=response.content) ####### 여기 #######
+                    
                     content = f"Question: {confirmation_question}\nInterviewee's Response: {response.content}"
                     res = get_completion(
                         model=self.model,
@@ -334,12 +346,15 @@ class InterrogationEnv:
         message = f"Question:{question}\nResponse: {answer}" # find interviewee_response (first index)
         
         # internal consistency check
-        conflict_count, conflict_pairs = await self.check_internal(question, answer)
-        self.internal_conflict_pairs_cnt += conflict_count
-        self.internal_conflict_pairs.extend(conflict_pairs)
-
         next_action, observation, filtered_actions, confirmed_results = await self.check_external(message)
         self.confirmed_results.extend(confirmed_results)
+        
+        """internal을 external 다음에 실행하도록 순서 변경, evaluator가 external, internal 둘 다 봄"""
+        # conflict_count, conflict_pairs = await self.check_internal(question, answer)
+        # self.internal_conflict_pairs_cnt += conflict_count
+        # self.internal_conflict_pairs.extend(conflict_pairs)
+
+        verdict_action = self.agents['evaluator'].act() ####### 여기 #######
         
         return next_action, observation, filtered_actions, confirmed_results, conflict_pairs
     
@@ -375,7 +390,8 @@ class InterrogationEnv:
         logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
         
         # update state
-        self.agents['questioner'].update_memory(role="user", content=response.content)
+        self.agents['questioner'].update_memory(role="user", content=response.content) 
+        self.agents['evaluator'].update_memory(role="user", content=response.content) ####### 여기 #######
         self.state.current_turn += 1
         turn = Turn(
             type='main_interrogation',

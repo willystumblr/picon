@@ -11,6 +11,7 @@ import re
 import os
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def parse_args():
@@ -32,6 +33,41 @@ def parse_args():
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
     
     return parser.parse_args()
+
+def main(interviewee_kwarg):
+    try:
+        logging.info(f"Starting new session with interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}")
+        tools = {
+            "google_claim_search": GoogleClaimSearch(
+                api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
+                cx=os.getenv('GOOGLE_CX_ID'),
+            ),
+            "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
+        }
+        env = InterrogationEnv(
+            model=args.model,
+            agents = {
+                "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.model),
+                "extractor": get_agent("claim_extractor", args.claim_extractor_prompt_path, model=args.model) if args.use_claim_extractor else get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.model),
+                "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.model),
+                "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.model),
+            },
+            tools=tools,
+            max_turns=args.num_turns,
+            **interviewee_kwarg
+        )
+        state = env.reset()
+        done = False
+        while not done:
+            state, done = env.step()
+        state = env.finalize()
+        result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+        env.save_state(result_path)
+    except Exception as e:
+        logging.exception(f"Error during session with interviewee {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}: {e}")
+        logging.info("Saving partial state...")
+        env.save_state(f"{args.temp_output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_error_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json", termination_status=f"Error: {str(e)}")
+        return
 
 if __name__ == "__main__":
     args = parse_args()
@@ -84,43 +120,27 @@ if __name__ == "__main__":
     else:
         raise ValueError("Invalid baseline name. Choose from ['characterai', 'human_simulacra', 'opencharacter', 'human_interview']")
     
+    proceed_list = []
     for interviewee_kwarg in interviewee_kwargs:
-        try:
-            logging.info(f"Proceed to the interview session? [Y/N] (Interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']})")
-            # proceed if y or no input for 10 seconds, else skip
-            user_input = get_user_input_with_timeout(10)
-            if user_input and user_input.lower() != 'y':
-                logging.info(f"Skipping the interview session for interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}")
-                continue
-            logging.info(f"Starting new session with interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}")
-            tools = {
-                "google_claim_search": GoogleClaimSearch(
-                    api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
-                    cx=os.getenv('GOOGLE_CX_ID'),
-                ),
-                "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
-            }
-            env = InterrogationEnv(
-                model=args.model,
-                agents = {
-                    "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.model),
-                    "extractor": get_agent("claim_extractor", args.claim_extractor_prompt_path, model=args.model) if args.use_claim_extractor else get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.model),
-                    "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.model),
-                    "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.model),
-                },
-                tools=tools,
-                max_turns=args.num_turns,
-                **interviewee_kwarg
-            )
-            state = env.reset()
-            done = False
-            while not done:
-                state, done = env.step()
-            state = env.finalize()
-            result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-            env.save_state(result_path)
-        except Exception as e:
-            logging.exception(f"Error during session with interviewee {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}: {e}")
-            logging.info("Saving partial state...")
-            env.save_state(f"{args.temp_output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_error_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json", termination_status=f"Error: {str(e)}")
-            continue
+        logging.info(f"Proceed to the interview session? [Y/N] (Interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']})")
+        # proceed if y or no input for 10 seconds, else skip
+        while True:
+            user_input = get_user_input_with_timeout(timeout=10)
+            if user_input is None or user_input.lower() == 'y':
+                logging.info(f"Interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']} added to the queue.")
+                proceed_list.append(interviewee_kwarg)
+                break
+            elif user_input.lower() == 'n':
+                logging.info("Skipping this interviewee.")
+                break
+            else:
+                logging.info("Invalid input. Please enter Y or N.")
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(main, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
+        for future in as_completed(futures):
+            interviewee_kwarg = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                logging.exception(f"Unhandled exception for interviewee {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}: {e}")

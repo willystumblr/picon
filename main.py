@@ -126,7 +126,7 @@ if __name__ == "__main__":
         # proceed if y or no input for 10 seconds, else skip
         while True:
             user_input = get_user_input_with_timeout(timeout=10)
-            if user_input is None or user_input.lower() == 'y':
+            if not user_input or user_input.lower() == 'y':
                 logging.info(f"Interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']} added to the queue.")
                 proceed_list.append(interviewee_kwarg)
                 break

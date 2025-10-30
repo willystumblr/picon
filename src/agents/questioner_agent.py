@@ -35,18 +35,13 @@ class QuestionerAgent(Agent):
         else:
             self.memory.append(kwargs) # typically role and content
 
-    def act(self, conflict_pairs: List = [], confirmed_results: List = []) -> Action:
-        if conflict_pairs or confirmed_results:
-            if not conflict_pairs:
-                conflict_pairs = ["No conflicting QA pairs identified so far."]
-            if not confirmed_results:
-                confirmed_results = ["No confirmed results from web search so far."]
+    def act(self, verdict: Dict = None) -> Action:
+        if verdict:
             self.update_memory(
                 role="user",
-                content=f"[INSTRUCTION] The following are the conflict QA pairs identified so far: {json.dumps(conflict_pairs)}.\n"
-                        f"The following are the confirmed results from web search: {json.dumps(confirmed_results)}.\n\n"
-                        "Based on this information, please formulate the next question to ask the interviewee."
-                        "Question: "
+                content=f"[INSTRUCTION] The following is the evaluator's verdict on the previous QA, evaluating its consistency with the previous conversation history. "
+                        "You may refer to this verdict for the next question formulation.\n\n"
+                        f"Verdict: {json.dumps(verdict)}"
             )
         
         res = get_completion(

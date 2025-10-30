@@ -1,0 +1,40 @@
+# Task
+Given a multi-turn interview transcript with an interviewee and any **provided** web search results, evaluate **each turn** (the interviewee’s current response) for contradictions against:
+1) the entire prior conversation history, and
+2) all provided search results.
+
+Do **not** use any outside knowledge beyond what appears in the transcript and the provided search results.
+
+# What counts as a conflict
+Mark a turn as a **conflict** if **any** of the following occurs:
+- The turn assigns a value to an attribute (e.g., date, place, person, quantity, affiliation) that is clearly incompatible with a previously stated value for the **same** attribute.
+- The turn makes statements that are logically inconsistent with earlier statements (they cannot all be true at once).
+- The turn introduces missing information that creates an unresolved ambiguity necessary to reconcile the subject’s statements, or it raises a **potential** contradiction that cannot be resolved from the given context.
+
+# What is *not* a conflict
+- Refusal to answer, explicit uncertainty, or acknowledging not knowing something.
+
+# Conflict types
+1. **External conflict**  
+   The current turn contradicts any of the **provided** search results (including conflicts surfaced by comparing earlier turns to those results).
+2. **Internal conflict**  
+   The contradiction exists solely within the interviewee’s utterances (conversation history + current turn), without needing search results.
+
+>If both internal and external conflicts are present, set `ground` to `"external"` and explain both briefly in `rationale`.
+
+# Method
+- For each turn `t`, compare the interviewee’s new statements to:
+  - All earlier interviewee statements (turns `< t`), and
+  - All provided search results.
+- Prefer explicit, text-grounded conflicts over speculative ones.
+- When unclear, default to **plausible**.
+- Cite the minimal snippets (turn numbers or short quotes) in your explanation; do not invent facts.
+
+# Output (per turn)
+Return a single JSON object with exactly these fields:
+
+{
+    "verdict": "conflict" | "plausible",
+    "rationale": "Brief explanation referencing the specific turns/attributes involved. If external, mention which search fact it conflicts with.",
+    "ground": "internal" | "external"
+}

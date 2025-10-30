@@ -33,5 +33,8 @@ def get_agent(
     elif agent_type == "kg_agent":
         from src.agents.kg_agent import KGAgent
         return KGAgent(role="kg_agent", system_message=open(system_message_path).read() if system_message_path else "Extract knowledge triplets from the given QA pair.", **kwargs)
+    elif agent_type == "evaluator":
+        from src.agents.evaluator import EvaluatorAgent
+        return EvaluatorAgent(role="evaluator", system_message=open(system_message_path).read(), **kwargs)
     else:
         raise ValueError(f"Unsupported agent type: {agent_type}")

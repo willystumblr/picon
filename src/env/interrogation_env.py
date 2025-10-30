@@ -72,11 +72,15 @@ class InterrogationEnv:
         self.internal_count = 0
         self.internal_conflict = 0
         self.internal_plausible = 0
+        self.internal_conflict_verdicts = []
         
         # external
         self.external_count = 0
         self.external_conflict = 0
         self.external_plausible = 0
+        self.external_conflict_verdicts = []
+        
+        self.first_conflict_turn = None
         
         # repeat
         self.repeat_score = 0
@@ -135,22 +139,23 @@ class InterrogationEnv:
             self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
             if i > 0:
-                entity_action, web_observation, web_search_actions, verdict_action = asyncio.run(self.consistency_check(
+                entity_action, web_observation, web_search_actions, verdict_actions = asyncio.run(self.consistency_check(
                     question=q['question'],
                     answer=response.content
                 ))
-                self.score_conflict(verdict_action)
+                for verdict_action in verdict_actions:
+                    self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
                 if web_search_actions:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions, verdict_action], environment_observation=[res_observation, web_observation])
+                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions, *verdict_actions], environment_observation=[res_observation, web_observation])
                 else:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action, verdict_action], environment_observation=[res_observation])
+                    turn = Turn(type='get_to_know', agent_action=[entity_action, *verdict_actions], environment_observation=[res_observation])
             else:
                 turn = Turn(type='get_to_know', agent_action=[action], environment_observation=[res_observation])
             self.state.history.append(turn)
 
         return self.state
 
-    async def check_external(self, message : str) -> bool:
+    def check_external(self, message : str) -> bool:
         # 1. Extractor first extracts the entity & claim to verify
         next_action = self.agents["extractor"].act(message)
         logging.info(f"[ACTION] Extractor: {next_action.action_type} - {next_action.content if next_action.content else next_action.target_agent}")
@@ -161,7 +166,6 @@ class InterrogationEnv:
             logging.info("No entity or claim extracted. Passing to Questioner.")
             observation = None
             filtered_actions = []
-            confirmed_results = []
         elif next_action.action_type == "respond": # should be respond with entity & claim
             if next_action.content is None:
                 logging.error("Extractor must respond with entity & claim.")
@@ -230,16 +234,22 @@ class InterrogationEnv:
                 filtered_actions = []
         return next_action, observation, filtered_actions
     
-    async def consistency_check(self, question: str, answer : str):
+    def consistency_check(self, question: str, answer : str):
         message = f"Question:{question}\nResponse: {answer}" # find interviewee_response (first index)
-        
+        verdict_actions = []
         # internal consistency check
-        entity_action, observation, web_search_actions = await self.check_external(message)
-        verdict_action = self.agents['evaluator'].act() ####### 여기 #######
-        
+        verdict_action = self.agents['evaluator'].act()
+        verdict_actions.append(verdict_action)
+        self.score_conflict(verdict_action)
+        entity_action, observation, web_search_actions = self.check_external(message)
+        if web_search_actions:
+            verdict_action_web = self.agents['evaluator'].act() ####### 여기 #######
+            self.score_conflict(verdict_action_web)
+            verdict_actions.append(verdict_action_web)
+
         logging.info(f"[ACTION] Evaluator: {verdict_action.action_type} - {verdict_action.content if verdict_action.content else verdict_action.target_agent}")
         
-        return entity_action, observation, web_search_actions, verdict_action
+        return entity_action, observation, web_search_actions, verdict_actions
     
     
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
@@ -247,8 +257,8 @@ class InterrogationEnv:
         if self.state.current_turn >= self.max_turns:
             logging.warning("Max turns reached. Please reset the environment.")
             return self.state, True
-        
-        question_act = self.agents['questioner'].act()
+        verdict = self.state.history[-1].agent_action[-1].content if self.state.history else None
+        question_act = self.agents['questioner'].act(verdict=verdict)
         logging.info(f"[ACTION] Questioner: {question_act.action_type} - {question_act.content if question_act.content else question_act.tool_call.tool_name}")
         self.agents['evaluator'].update_memory(role="assistant", content=question_act.content)
         interviewee_res = self.interviewee.get_response(question_act.content)
@@ -256,17 +266,15 @@ class InterrogationEnv:
         
         self.agents['questioner'].update_memory(role="user", content=interviewee_res.content) 
         self.agents['evaluator'].update_memory(role="user", content=interviewee_res.content)
-        
-        entity_action, observation, web_search_actions, verdict_action = asyncio.run(self.consistency_check(
+
+        entity_action, observation, web_search_actions, verdict_action = self.consistency_check(
             interviewee_res.question,
             interviewee_res.content
-        ))
-
-        self.score_conflict(verdict_action)
+        )
 
         self.state.current_turn += 1
 
-        actions = [question_act, entity_action, *web_search_actions, verdict_action] if web_search_actions else [question_act, entity_action, verdict_action]
+        actions = [question_act, entity_action, *web_search_actions, *verdict_action] if web_search_actions else [question_act, entity_action, *verdict_action]
         res_ob = Observation(observation_type="interviewee_response", response=interviewee_res)
         observations = [res_ob, observation] if observation else [res_ob]
         turn = Turn(
@@ -280,17 +288,29 @@ class InterrogationEnv:
         return self.state, False
 
     def score_conflict(self, verdict_action: Action):
-        if verdict_action.content['ground'] == 'internal':
-            self.internal_count += 1
-            if verdict_action.content['verdict'] == 'conflict':
+        if verdict_action.content['verdict'] == 'conflict': # verdict_action.content['ground'] == 'internal':
+            if verdict_action.content['ground'] == 'internal':
+                self.internal_count += 1
                 self.internal_conflict += 1
+                self.internal_conflict_verdicts.append({
+                    "turn": self.state.current_turn,
+                    "verdict": verdict_action.content
+                })
             else:
-                self.internal_plausible += 1
-        else:
-            self.external_count += 1
-            if verdict_action.content['verdict'] == 'conflict':
+                self.external_count += 1
                 self.external_conflict += 1
+                self.external_conflict_verdicts.append({
+                    "turn": self.state.current_turn,
+                    "verdict": verdict_action.content
+                })
+            if self.first_conflict_turn is None:
+                self.first_conflict_turn = self.state.current_turn
+        else:
+            if verdict_action.content['ground'] == 'internal':
+                self.internal_count += 1
+                self.internal_plausible += 1
             else:
+                self.external_count += 1
                 self.external_plausible += 1
 
     def finalize(self):
@@ -355,17 +375,20 @@ class InterrogationEnv:
             "agent_memory": {
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
+            "first_conflict_turn": self.first_conflict_turn,
             "external_consistency": {
                 "total_evaluations": self.external_count,
                 "conflict_count": self.external_conflict,
                 "plausible_count": self.external_plausible,
-                "consistency_rate": self.external_plausible / self.external_count if self.external_count > 0 else 0
+                "consistency_rate": self.external_plausible / self.external_count if self.external_count > 0 else 0,
+                "conflict_verdicts": self.external_conflict_verdicts
             },
             "internal_consistency": {
                 "total_evaluations": self.internal_count,
                 "conflict_count": self.internal_conflict,
                 "plausible_count": self.internal_plausible,
-                "consistency_rate": self.internal_plausible / self.internal_count if self.internal_count > 0 else 0
+                "consistency_rate": self.internal_plausible / self.internal_count if self.internal_count > 0 else 0,
+                "conflict_verdicts": self.internal_conflict_verdicts
             },
             "repeat":{
                 "repeat_score": self.repeat_score,

@@ -10,6 +10,15 @@ Drive a fully controlled, turn-by-turn **personal** interview that:
 
 # Inputs You Can Assume
 - The chat history (your prior questions and the subject’s answers).
+- The verdict (either conflict or plausible) of the previous turn.
+## Conflict types
+1. **External conflict**  
+   The current turn contradicts any of the **provided** search results (including conflicts surfaced by comparing earlier turns to those results).
+2. **Internal conflict**  
+   The contradiction exists solely within the interviewee’s utterances (conversation history + current turn), without needing search results.
+
+>If both internal and external conflicts are present, `ground` is set to `"external"` and explanation is provided in `rationale`.
+
 
 # Output Requirements (each turn)
 - Output **only one question**, nothing else.

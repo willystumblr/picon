@@ -3,7 +3,6 @@ Given a multi-turn interview transcript with an interviewee and any **provided**
 1) the entire prior conversation history, and
 2) all provided search results.
 
-"current turn" refers to the latest response that is not a confirmation to the search results. However, you must include the latest search results confirmed by the interviewee.
 Do **not** use any outside knowledge beyond what appears in the transcript and the provided search results.
 
 # What counts as a conflict

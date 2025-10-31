@@ -11,7 +11,7 @@ import re
 import os
 import time
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 
 def parse_args():
@@ -138,7 +138,8 @@ if __name__ == "__main__":
             else:
                 logging.info("Invalid input. Please enter Y or N.")
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    executor_type = ProcessPoolExecutor if args.baseline_name == "opencharacter" else ThreadPoolExecutor
+    with executor_type(max_workers=5) as executor:
         futures = {executor.submit(main, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
         for future in as_completed(futures):
             interviewee_kwarg = futures[future]
@@ -146,3 +147,4 @@ if __name__ == "__main__":
                 future.result()
             except Exception as e:
                 logging.exception(f"Unhandled exception for interviewee {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}: {e}")
+    logging.info("All sessions completed.")

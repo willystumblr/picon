@@ -239,14 +239,14 @@ class QuestionerTestEnv:
         self.agents['questioner'].update_memory(role="user", content=interviewee_res.content) 
         self.agents['evaluator'].update_memory(role="user", content=interviewee_res.content)
 
-        entity_action, observation, web_search_actions, verdict_action = self.consistency_check(
+        entity_action, observation, web_search_actions = self.consistency_check(
             interviewee_res.question,
             interviewee_res.content
         )
 
         self.state.current_turn += 1
 
-        actions = [question_act, entity_action, *web_search_actions, *verdict_action] if web_search_actions else [question_act, entity_action, *verdict_action]
+        actions = [question_act, entity_action, *web_search_actions] if web_search_actions else [question_act, entity_action]
         res_ob = Observation(observation_type="interviewee_response", response=interviewee_res)
         observations = [res_ob, observation] if observation else [res_ob]
         turn = Turn(
@@ -274,12 +274,64 @@ class QuestionerTestEnv:
             "agent_memory": {
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
+            "repeat_score":{
+                "repeat_score": self.repeat_score,
+                "repeat_results": self.repeat_results
+            }
         }
         write_json(final_result, path)
         
         logging.info(f"Saving final result to {path}")
         logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
+
+    def finalize(self):
+        """repeat stage: repeat the pre-defined questions to check for consistency"""
         
+        REPEAT_PROMPT = """You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning.
+If they are, output TRUE. If they are not, output FALSE.
+Do not output any additional explanation or text."""
+        
+        for i, q in enumerate(self.predefined_questions):
+            logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
+            response = self.interviewee.get_response(f"Just to clarify, {q['question']}")
+            logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
+            if i == 0:
+                # first turn defines the cutoff date
+                continue
+            # update state
+            action = Action(action_type="respond", content=q['question'])
+            observation = Observation(
+                observation_type="interviewee_response",
+                response=response
+            )
+            turn = Turn(type='repeat', agent_action=[action], environment_observation=[observation])
+            self.state.history.append(turn)
+            
+            inital_response = self.state.history[i].environment_observation[0].response.content
+            while True:
+                res = get_completion(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": REPEAT_PROMPT},
+                        {"role": "user", "content": f"Question: {q['question']}\n\nResponse 1: {inital_response}\nResponse 2: {response.content}"}
+                    ],
+                    reasoning_effort="low",
+                )
+                self.env_cost += completion_cost(res)
+                judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else "FALSE"
+                if judge in ["TRUE", "FALSE"]:
+                    break
+                logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
+            
+            self.repeat_results.append({
+                "question": f"Just to clarify, {q['question']}",
+                "original_response": inital_response,
+                "repeated_response": response.content,
+                "is_repeat": judge
+            })
+            self.repeat_score += (judge=='TRUE')
+        self.repeat_score = round(self.repeat_score / len(self.predefined_questions-1), 4)
+        return self.state
 
 if __name__ == "__main__":
     from src.utils import setup_logging
@@ -333,4 +385,5 @@ if __name__ == "__main__":
     done = False
     while not done:
         state, done = env.step()
+    env.finalize()
     env.save_state(f"data/prompt_engineering/questioner/questioner_test_history_{time.strftime('%Y%m%d_%H%M%S')}.json")

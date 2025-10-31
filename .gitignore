@@ -1,2 +1,9 @@
 .env
 *.log
+*.jsonl
+*.json
+*.pyc
+*.html
+*.ipynb
+*.sh
+*.tar.gz

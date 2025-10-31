@@ -52,7 +52,7 @@ class IntervieweeSimulator:
         elif self.type == "human_simulacra":
             #### **name** are required
             assert 'name' in kwargs, "Human Simulacra requires name parameter"
-            self.client_or_model = Top_agent(character_name=kwargs['name']) ### has its own chat history
+            self.client_or_model = Top_agent(character_name=kwargs['name'], model=kwargs['hs_model']) ### has its own chat history
             
         elif self.type == "opencharacter": 
             #### **model_path, persona, profile** are required ####
@@ -111,6 +111,7 @@ class IntervieweeSimulator:
         
         elif self.type == "human_simulacra":
             response = self.client_or_model.send_message(message)
+            self.cost += self.client_or_model.cost
         
         elif self.type == "opencharacter": # OpenCharacter
             self.history.append({

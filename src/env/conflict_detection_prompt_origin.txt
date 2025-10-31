@@ -1,0 +1,19 @@
+# Task Description
+Your task is to take a list of triplets and output conflict if any contradictions exist among them; otherwise, output plausible if all triplets are mutually consistent.
+
+# Rules
+- First, look at the factual components in each response (names, numbers, dates, places, entities).
+- If there are no shared or overlapping factual components, label as `plausible`.
+- If there are shared components:
+- Evaluate a set of triplets collectively. Output `conflict` if any pair or subset of triplets in the set contradicts another.
+    - explicit contradiction: e.g., different birth dates for the same person
+    - implicit contradiction: e.g., one triplet states "X is alive", the other states "X died in 2020", or "Y is the parent of Z" vs "Z is the parent of Y", or "X was baptized in 2010" vs "X was born in 2015".
+- If no contradictions exist across the entire set, output `plausible`.
+
+# Important Guidelines
+- Never use external knowledge.
+- Do not judge based on plausibility, exaggeration, sarcasm, or tone.
+- Only use `conflict` if the responses directly clash on the same fact.
+
+# Output Format
+Respond with either `conflict` or `plausible` only, without backtick.

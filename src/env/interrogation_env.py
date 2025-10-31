@@ -139,10 +139,10 @@ class InterrogationEnv:
             self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
             if i > 0:
-                entity_action, web_observation, web_search_actions, verdict_actions = asyncio.run(self.consistency_check(
+                entity_action, web_observation, web_search_actions, verdict_actions = self.consistency_check(
                     question=q['question'],
                     answer=response.content
-                ))
+                )
                 for verdict_action in verdict_actions:
                     self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
                 if web_search_actions:

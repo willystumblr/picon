@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'human_interview'])
     parser.add_argument('--model', type=str, default=None, help='Model name for the interrogation.')
     parser.add_argument('--nhd_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the NHD detector in the interviewee simulator.')
+    parser.add_argument('--hs_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the Human Simulacra interviewee simulator.')
     parser.add_argument('--num_turns', type=int, default=30, help='Maximum number of turns in the interrogation.')
     parser.add_argument('--sample', action='store_true', help='Whether to sample OpenCharacter personas.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for sampling personas.')
@@ -91,7 +92,8 @@ if __name__ == "__main__":
         interviewee_kwargs = [{
             "baseline_name": "human_simulacra",
             "name": name,            
-            "nhd_model": args.nhd_model
+            "nhd_model": args.nhd_model,
+            "hs_model": args.hs_model
         } for name in ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami Clark", "Michael Miller", "Kevin Kelly", "Erica Walker", "Leslie Nichols", "Robert Scott", "Marsh Zhaleh"]]
     elif args.baseline_name == "opencharacter":
         dataset = load_dataset("xywang1/OpenCharacter", "Synthetic-Character", split="train")

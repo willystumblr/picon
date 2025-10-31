@@ -102,6 +102,7 @@ class EvaluatorTestEnv:
             self.env_cost += completion_cost(verdict)
             response = EvaluationResponse.model_validate_json(verdict.choices[0].message.content)
             content = response.model_dump()
+            logging.info(f"[EVALUATOR] Verdict: {content['verdict']}, Ground: {content['ground']}, Rationale: {content['rationale']}")
             verdict_action = Action(
                 agent="evaluator",
                 action_type="respond",
@@ -114,8 +115,9 @@ class EvaluatorTestEnv:
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result = {
+            "interview_path": self.interview_path,
             "total_cost": self.env_cost,
-            "duration": time.time() - self.start_time,
+            "duration": f"{(time.time() - self.start_time)/60:.2f} minutes",
             "first_conflict_turn": self.first_conflict_turn,
             "external_consistency":{
                 "total_evaluations": self.external_count,
@@ -159,7 +161,5 @@ if __name__ == "__main__":
         interview_path=args.interview_path
     )
     state = env.reset()
-    done = False
-    while not done:
-        done = env.step()
-    env.save_state(f"data/prompt_engineering/conflict_detection/conflict_detection_test_history_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    env.step()
+    env.save_state(f"data/prompt_engineering/conflict_detection/evaluation_{time.strftime('%Y%m%d_%H%M%S')}.json")

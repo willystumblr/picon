@@ -139,10 +139,10 @@ class InterrogationEnv:
             self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
             if i > 0:
-                entity_action, web_observation, web_search_actions, verdict_actions = asyncio.run(self.consistency_check(
+                entity_action, web_observation, web_search_actions, verdict_actions = self.consistency_check(
                     question=q['question'],
                     answer=response.content
-                ))
+                )
                 for verdict_action in verdict_actions:
                     self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
                 if web_search_actions:
@@ -239,6 +239,7 @@ class InterrogationEnv:
         verdict_actions = []
         # internal consistency check
         verdict_action = self.agents['evaluator'].act()
+        logging.info(f"[ACTION] Evaluator: {verdict_action.action_type} - {verdict_action.content if verdict_action.content else verdict_action.target_agent}")
         verdict_actions.append(verdict_action)
         self.score_conflict(verdict_action)
         entity_action, observation, web_search_actions = self.check_external(message)
@@ -246,9 +247,8 @@ class InterrogationEnv:
             verdict_action_web = self.agents['evaluator'].act() ####### 여기 #######
             self.score_conflict(verdict_action_web)
             verdict_actions.append(verdict_action_web)
-
-        logging.info(f"[ACTION] Evaluator: {verdict_action.action_type} - {verdict_action.content if verdict_action.content else verdict_action.target_agent}")
-        
+            logging.info(f"[ACTION] Evaluator: {verdict_action_web.action_type} - {verdict_action_web.content if verdict_action_web.content else verdict_action_web.target_agent}")
+            
         return entity_action, observation, web_search_actions, verdict_actions
     
     
@@ -356,7 +356,7 @@ class InterrogationEnv:
                 "is_repeat": judge
             })
             self.repeat_score += (judge=='TRUE')
-        self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
+        self.repeat_score = round(self.repeat_score / (len(self.predefined_questions)-1), 4)
         return self.state
         
     

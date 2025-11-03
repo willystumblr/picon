@@ -1,4 +1,5 @@
 import time
+import inspect
 from src.env.interviewee_simulator import IntervieweeSimulator
 from typing import List, Dict, Any
 from src.agents.base_agent import Agent
@@ -362,13 +363,25 @@ class InterrogationEnv:
     
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
+        agent_cost = sum(agent.cost for agent in self.agents.values())
+        interviewee_cost = self.interviewee.cost 
+        if inspect.isclass(getattr(self.interviewee, "client_or_model", None)) and hasattr(self.interviewee.client_or_model, 'cost'):
+            logging.info("Calculating interviewee cost from client_or_model.")  
+            interviewee_cost += self.interviewee.client_or_model.cost
+        total_cost = agent_cost + interviewee_cost + self.env_cost
+        
         final_result={
             "agents_info":{agent_name: agent.model for agent_name, agent in self.agents.items()},
             "interviewee_info": {
                 "name": self.interviewee.name,
                 "baseline": self.interviewee.type,
             },
-            "total_cost": sum(agent.cost for agent in self.agents.values()) + self.interviewee.cost + self.env_cost,
+            "cost": {
+                "agents_cost": agent_cost,
+                "interviewee_cost": interviewee_cost,
+                "environment_cost": self.env_cost,
+                "total_cost": total_cost
+            },
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
             "termination_status": termination_status,
             "history": [obj.model_dump() for obj in self.state.history],
@@ -398,6 +411,11 @@ class InterrogationEnv:
         write_json(final_result, path)
         
         logging.info(f"Saving final result to {path}")
+        
+        logging.info("Cost: (agent) :" + ", ".join([f"{agent_name}: ${agent.cost}" for agent_name, agent in self.agents.items()]))
+        logging.info(f"Cost: (interviewee): ${interviewee_cost}")
+        logging.info(f"Cost: (environment): ${self.env_cost}")
+        
         logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
         logging.info(f"External consistency: {final_result['external_consistency']['consistency_rate']}")
         logging.info(f"Internal consistency: {final_result['internal_consistency']['consistency_rate']}")

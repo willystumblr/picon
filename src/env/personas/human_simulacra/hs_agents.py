@@ -1,18 +1,16 @@
 import os
 import argparse
 from langchain_openai import ChatOpenAI
-from langchain.schema import (
-    SystemMessage,
-    HumanMessage,
-    AIMessage
-)
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_community.callbacks.manager import get_openai_callback
 import json
 import re
 import sys
+import logging
 from colorama import Fore, Style
 from dotenv import load_dotenv
 from tiktoken import encoding_for_model
-
+from litellm import get_max_tokens
 
 load_dotenv()  # Load environment variables from .env file
 BASE_DIR = os.path.dirname(__file__)
@@ -22,6 +20,20 @@ CHARACTERS = ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami 
 INTRODUCTIONS_PATH = f"{BASE_DIR}/Characters/character_introductions.json"
 STORY_DIR = f"{BASE_DIR}/Characters/Stories"
 MEMORY_DIR = f"{BASE_DIR}/Characters/Memories"
+
+
+
+def get_context_limit(model: str, provider: str | None = None) -> int | None:
+    """
+    provider 예: "openai", "anthropic", "gemini", "bedrock", "azure"
+    provider가 None이면 자동 추론
+    """
+    try:
+        if provider:
+            return get_max_tokens(model=model, custom_llm_provider=provider)
+        return get_max_tokens(model=model)
+    except Exception:
+        return None
 
 
 class Memory_agent:
@@ -36,7 +48,7 @@ class Memory_agent:
         self.api_base = api_base
         self.api_key = api_key
         self.path = os.path.join(MEMORY_DIR, character_name)
-        
+        self.cost = 0.0
         self.sum = ChatOpenAI(
             openai_api_base=self.api_base,
             openai_api_key=self.api_key,
@@ -172,9 +184,10 @@ class Memory_agent:
             query = Query
         )
         messages2.append(HumanMessage(content=user_prompt))
-
-        ans = self.retrieval.invoke(messages1).content
-        ans += self.retrieval.invoke(messages2).content
+        with get_openai_callback() as cb:
+            ans = self.retrieval.invoke(messages1).content
+            ans += self.retrieval.invoke(messages2).content
+            self.cost += cb.total_cost
         pattern = r'"\d{3}"'  
         matches = re.findall(pattern, ans)  
         result_list = list(set([match.strip('"') for match in matches]))
@@ -200,6 +213,7 @@ class Thinking_agent:
             model=model,
             temperature = self.temperature
         )
+        self.cost = 0.0
     
     def Memory_construction(self, LifeStory_chunk):
         # Construct "Memory Content" and "thinking" based on a segment of the Life_story
@@ -215,7 +229,9 @@ class Thinking_agent:
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
         # Generate memory
-        ans = self.think.invoke(messages)
+        with get_openai_callback() as cb:
+            ans = self.think.invoke(messages)
+            self.cost += cb.total_cost
         return ans.content
     
     def Thinking_Memory_construction(self, memory_chunk):
@@ -233,7 +249,9 @@ class Thinking_agent:
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
         # Generate thinking about the memory chunk
-        ans = self.think.invoke(messages)
+        with get_openai_callback() as cb:
+            ans = self.think.invoke(messages)
+            self.cost += cb.total_cost
         return ans.content
     
     def Thinking_analysis(self, query):
@@ -251,8 +269,9 @@ class Thinking_agent:
 
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
-        
-        Thinking_result = self.think.invoke(messages)
+        with get_openai_callback() as cb:
+            Thinking_result = self.think.invoke(messages)
+            
         return Thinking_result.content
 
 class Emotion_agent:
@@ -272,6 +291,7 @@ class Emotion_agent:
             model=model,
             temperature = self.temperature
         )
+        self.cost = 0.0
 
     def Memory_construction(self, LifeStory_chunk):
         # Construct "Emotion Memory" based on a segment of the Life_story
@@ -288,7 +308,9 @@ class Emotion_agent:
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
         # Generate emotional memory
-        ans = self.emotion.invoke(messages)
+        with get_openai_callback() as cb:
+            ans = self.emotion.invoke(messages)
+            self.cost += cb.total_cost
         return ans.content
 
 
@@ -308,8 +330,9 @@ class Emotion_agent:
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
 
-        emo_result = self.emotion.invoke(messages)
-
+        with get_openai_callback() as cb:
+            emo_result = self.emotion.invoke(messages)
+            self.cost += cb.total_cost
         return emo_result.content
     
 
@@ -319,12 +342,13 @@ class Top_agent:
     # (2) Construct and maintain working memory;
     # (3) Answer queries based on working memory.
       
-    def __init__(self, character_name, model:str="gpt-4.1-mini", temperature = 0.0, api_base = BASE_URL, api_key = os.environ['OPENAI_API_KEY']):
+    def __init__(self, character_name, model:str="gpt-4.1-mini", temperature = 1.0, api_base = BASE_URL, api_key = os.environ['OPENAI_API_KEY']):
         self.api_base = api_base
         self.api_key = api_key
-        
+        self.cost = 0.0
         self.name = character_name
         self.temperature = temperature
+        self.model = model
         flag = False
         with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
             introductions = json.load(file)
@@ -497,6 +521,8 @@ class Top_agent:
             memory_retrieval = self.Memory_Agent.Memory_Retrieval(query)
             thinking = self.Thinking_Agent.Thinking_analysis(query)
             emotion = self.Emotion_Agent.Emotion_analysis(query)
+            self.cost += self.Memory_Agent.cost + self.Thinking_Agent.cost + self.Emotion_Agent.cost 
+
             
             if memory_retrieval:
                 memory = str(memory_retrieval)
@@ -546,6 +572,8 @@ class Top_agent:
         memory_retrieval = self.Memory_Agent.Memory_Retrieval(message)
         thinking = self.Thinking_Agent.Thinking_analysis(message)
         emotion = self.Emotion_Agent.Emotion_analysis(message)
+        logging.info(f"{self.Memory_Agent.cost}, {self.Thinking_Agent.cost}, {self.Emotion_Agent.cost}")
+        self.cost += self.Memory_Agent.cost + self.Thinking_Agent.cost + self.Emotion_Agent.cost
         
         if memory_retrieval:
             memory = str(memory_retrieval)
@@ -571,7 +599,7 @@ class Top_agent:
         flattened_messages = [item for sublist in self.current_messages for item in sublist]
         
         # Count tokens in the messages
-        enc = encoding_for_model("gpt-4o")
+        enc = encoding_for_model(self.model)
         token_count = 0
         
         # Calculate total token count
@@ -579,7 +607,7 @@ class Top_agent:
             token_count += len(enc.encode(msg.content))
             
         # Define a maximum token limit (adjust based on your model's context window)
-        max_tokens = 1047576 # gpt-4.1-mini
+        max_tokens = get_context_limit(self.model)
         
         # Remove oldest messages if token count exceeds limit
         while token_count > max_tokens and len(self.current_messages) > 1:
@@ -596,8 +624,9 @@ class Top_agent:
         flattened_messages = [item for sublist in self.current_messages for item in sublist]
         # Flatten the list of lists
         
-        agents_ans = self.chat.invoke([self.system_prompt] + flattened_messages).content
-        
+        with get_openai_callback() as cb:
+            agents_ans = self.chat.invoke([self.system_prompt] + flattened_messages).content
+            self.cost += cb.total_cost
         
         temp_chat_history.append("The other person: " + message)
         temp_chat_history.append("You: " + agents_ans)
@@ -962,7 +991,7 @@ def main():
     # Add arguments
     parser.add_argument("--character_name", type=str, required=True, help="Name of the character")
     parser.add_argument("--method", type=str, choices=["prompt", "rag", "macm", "none"], required=True, help="Method of conversation: prompt, rag, none or macm")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature for the model")
+    parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for the model")
 
     # Parse arguments
     args = parser.parse_args()

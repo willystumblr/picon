@@ -111,7 +111,7 @@ class IntervieweeSimulator:
         
         elif self.type == "human_simulacra":
             response = self.client_or_model.send_message(message)
-            self.cost += self.client_or_model.cost
+            logging.info(f"Human Simulacra response cost so far: {self.client_or_model.cost:.6f} USD")
         
         elif self.type == "opencharacter": # OpenCharacter
             self.history.append({

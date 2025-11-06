@@ -13,6 +13,11 @@ from dotenv import load_dotenv
 from itertools import combinations
 from concurrent.futures import ThreadPoolExecutor
 
+class EvaluationResponse(BaseModel):
+    verdict: Literal['conflict', 'plausible']  # 'conflict' or 'plausible'
+    rationale: str  # explanation for the verdict
+    ground: Literal['internal', 'external'] = Field(description="Ground for the verdict. If `internal`, the verdict is based on the internal context (i.e., the conversation history without external information). If `external`, it is based on external web search results.")
+
 class EvaluatorTestEnv:
     def __init__(
         self, 
@@ -30,8 +35,9 @@ class EvaluatorTestEnv:
         data = read_json(interview_path)
         self.evaluator_history = data["agent_memory"]["evaluator"]
         self.history = data['history']
-        self.repeat_results = data['repeat_score'].get('repeat_results', [])
-        self.repeat_score = data['repeat_score'].get('repeat_score', None)
+        
+        self.repeat_results = data['repeat'].get('repeat_results', [])
+        self.repeat_score = [(res["is_repeat"]=="TRUE") for res in self.repeat_results].count(True) / len(self.repeat_results) if len(self.repeat_results) > 0 else None
         
         self.internal_count = 0
         self.external_count = 0
@@ -42,9 +48,15 @@ class EvaluatorTestEnv:
         self.internal_conflict_verdicts = []
         self.external_conflict_verdicts = []
         self.first_conflict_turn = None
+        
+        system_message_path = f"{project_root}/src/agents/prompts/evaluator_prompt.txt"
+        self.system_prompt = open(system_message_path).read()
+        self.evaluator_history[0]['content'] = self.system_prompt
+        
     def reset(self):
         """reset the environment"""
         # self.state = State(current_turn=1, history=[]) # n-th turn indicates the n-th user response
+        #breakpoint()
         self.user_indices = [i for i in range(0, len(self.evaluator_history)) if self.evaluator_history[i]['role']=='user'] # every 3 turns correspond to one user response
         self.user_indices.pop(0)  # remove the first user input which is the initial question
 
@@ -55,20 +67,20 @@ class EvaluatorTestEnv:
                 self.internal_count += 1
                 self.internal_conflict += 1
                 self.internal_conflict_verdicts.append({
-                    "turn": self.state.current_turn,
+                    "turn": 0,#self.state.current_turn,
                     "verdict": verdict_action.content
                 })
             else:
                 self.external_count += 1
                 self.external_conflict += 1
                 self.external_conflict_verdicts.append({
-                    "turn": self.state.current_turn,
+                    "turn": 0,#self.state.current_turn,
                     "verdict": verdict_action.content
                 })
-            if self.first_conflict_turn is None:
-                # find the corresponding user response turn
-                turn_idx = next(i for i, turn in enumerate(self.history) if turn['environment_observation'][0]['response'] == self.evaluator_history[idx]['content'])
-                self.first_conflict_turn = turn_idx
+            # if self.first_conflict_turn is None:
+            #     # find the corresponding user response turn
+            #     turn_idx = next(i for i, turn in enumerate(self.history) if turn['environment_observation'][0]['response'] == self.evaluator_history[idx]['content'])
+            #     self.first_conflict_turn = turn_idx
         else:
             if verdict_action.content['ground'] == 'internal':
                 self.internal_count += 1
@@ -77,30 +89,43 @@ class EvaluatorTestEnv:
                 self.external_count += 1
                 self.external_plausible += 1
     
+    def generate_verdict(self, messages: List[Dict[str, Any]]) -> Action:
+        #print(messages[-3]['role'])
+        if messages[-3]['role']=='tool':
+            ground = 'external'
+        else:
+            ground = 'internal'
+            
+        verdict = get_completion(
+            model=self.model,
+            messages=messages[:-1] + [{'role' : messages[-1]['role'] , 'content': messages[-1]['content'] + f"[conflict type] ground: {ground}"}], 
+            temperature=1.0,
+            response_format=EvaluationResponse
+        )
+        return verdict
+    
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation: process all at once"""
-        class EvaluationResponse(BaseModel):
-            verdict: Literal['conflict', 'plausible']  # 'conflict' or 'plausible'
-            rationale: str  # explanation for the verdict
-            ground: Literal['internal', 'external'] = Field(description="Ground for the verdict. If `internal`, the verdict is based on the internal context (i.e., the conversation history without external information). If `external`, it is based on external web search results.")
-        
         messages_list = [
             self.evaluator_history[:i+1] for i in self.user_indices
         ]
         logging.info(f"[EVALUATOR] Evaluating {len(messages_list)} user responses for internal consistency.")
-        with ThreadPoolExecutor(max_workers=32) as executor:
+        #breakpoint()
+        with ThreadPoolExecutor(max_workers=16) as executor:
             verdicts = list(tqdm(executor.map(
-                lambda messages: get_completion(
-                    model=self.model,
-                    messages=messages,
-                    temperature=1.0,
-                    response_format=EvaluationResponse
-                ),
+                lambda messages: self.generate_verdict(messages),
                 messages_list
             )))
+        
         for idx, verdict in enumerate(verdicts):
             self.env_cost += completion_cost(verdict)
-            response = EvaluationResponse.model_validate_json(verdict.choices[0].message.content)
+            try:
+                response = EvaluationResponse.model_validate_json(verdict.choices[0].message.content)
+            except Exception as e:
+                logging.error(f"[EVALUATOR] Validation error at index {idx}: {e}")
+                logging.info(f"[EVALUATOR] Raw response: {verdict.choices[0].message.content}")
+                breakpoint()
+                
             content = response.model_dump()
             logging.info(f"[EVALUATOR] Verdict: {content['verdict']}, Ground: {content['ground']}, Rationale: {content['rationale']}")
             verdict_action = Action(

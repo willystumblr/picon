@@ -144,8 +144,8 @@ class InterrogationEnv:
                     question=q['question'],
                     answer=response.content
                 )
-                for verdict_action in verdict_actions:
-                    self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
+                # for verdict_action in verdict_actions:
+                #     self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
                 if web_search_actions:
                     turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions, *verdict_actions], environment_observation=[res_observation, web_observation])
                 else:
@@ -258,8 +258,9 @@ class InterrogationEnv:
         if self.state.current_turn >= self.max_turns:
             logging.warning("Max turns reached. Please reset the environment.")
             return self.state, True
-        verdict = self.state.history[-1].agent_action[-1].content if self.state.history else None
-        question_act = self.agents['questioner'].act(verdict=verdict)
+        # verdict = self.state.history[-1].agent_action[-1].content if self.state.history else None
+        # question_act = self.agents['questioner'].act(verdict=verdict)
+        question_act = self.agents['questioner'].act()
         logging.info(f"[ACTION] Questioner: {question_act.action_type} - {question_act.content if question_act.content else question_act.tool_call.tool_name}")
         self.agents['evaluator'].update_memory(role="assistant", content=question_act.content)
         interviewee_res = self.interviewee.get_response(question_act.content)
@@ -364,10 +365,7 @@ class InterrogationEnv:
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         agent_cost = sum(agent.cost for agent in self.agents.values())
-        interviewee_cost = self.interviewee.cost 
-        if inspect.isclass(getattr(self.interviewee, "client_or_model", None)) and hasattr(self.interviewee.client_or_model, 'cost'):
-            logging.info("Calculating interviewee cost from client_or_model.")  
-            interviewee_cost += self.interviewee.client_or_model.cost
+        interviewee_cost = self.interviewee.calculate_cost()
         total_cost = agent_cost + interviewee_cost + self.env_cost
         
         final_result={

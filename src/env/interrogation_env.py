@@ -133,7 +133,6 @@ class InterrogationEnv:
             else:
                 turn = Turn(type='get_to_know', agent_action=[action], environment_observation=[res_observation])
             self.state.history.append(turn)
-            breakpoint()
         return self.state
 
     def check_external(self, message : str) -> bool:

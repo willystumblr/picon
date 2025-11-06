@@ -1,5 +1,4 @@
 import time
-import inspect
 from src.env.interviewee_simulator import IntervieweeSimulator
 from typing import List, Dict, Any
 from src.agents.base_agent import Agent
@@ -12,16 +11,11 @@ from src.utils import read_json, write_json, get_completion
 import logging
 from litellm.cost_calculator import completion_cost
 import os
-from tqdm import tqdm
 from dotenv import load_dotenv
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from itertools import combinations
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
-
-CONFLICT_PAIR_PROMPT = open(f"{project_root}/src/env/conflict_detection_prompt.txt").read()
 
 REPEAT_PROMPT = """You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning.
 If they are, output TRUE. If they are not, output FALSE.
@@ -69,19 +63,6 @@ class InterrogationEnv:
         self.start_time = time.time()
         self.env_cost = 0.0
 
-        # internal 
-        self.internal_count = 0
-        self.internal_conflict = 0
-        self.internal_plausible = 0
-        self.internal_conflict_verdicts = []
-        
-        # external
-        self.external_count = 0
-        self.external_conflict = 0
-        self.external_plausible = 0
-        self.external_conflict_verdicts = []
-        
-        self.first_conflict_turn = None
         
         # repeat
         self.repeat_score = 0
@@ -140,16 +121,15 @@ class InterrogationEnv:
             self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
             if i > 0:
-                entity_action, web_observation, web_search_actions, verdict_actions = self.consistency_check(
-                    question=q['question'],
-                    answer=response.content
+                entity_action, web_observation, web_search_actions = self.check_external(
+                    f"Question: {q['question']}\nResponse: {response.content}"
                 )
                 # for verdict_action in verdict_actions:
                 #     self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
                 if web_search_actions:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions, *verdict_actions], environment_observation=[res_observation, web_observation])
+                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions], environment_observation=[res_observation, web_observation])
                 else:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action, *verdict_actions], environment_observation=[res_observation])
+                    turn = Turn(type='get_to_know', agent_action=[entity_action], environment_observation=[res_observation])
             else:
                 turn = Turn(type='get_to_know', agent_action=[action], environment_observation=[res_observation])
             self.state.history.append(turn)
@@ -235,23 +215,6 @@ class InterrogationEnv:
                 filtered_actions = []
         return next_action, observation, filtered_actions
     
-    def consistency_check(self, question: str, answer : str):
-        message = f"Question:{question}\nResponse: {answer}" # find interviewee_response (first index)
-        verdict_actions = []
-        # internal consistency check
-        verdict_action = self.agents['evaluator'].act()
-        logging.info(f"[ACTION] Evaluator: {verdict_action.action_type} - {verdict_action.content if verdict_action.content else verdict_action.target_agent}")
-        verdict_actions.append(verdict_action)
-        self.score_conflict(verdict_action)
-        entity_action, observation, web_search_actions = self.check_external(message)
-        if web_search_actions:
-            verdict_action_web = self.agents['evaluator'].act() ####### 여기 #######
-            self.score_conflict(verdict_action_web)
-            verdict_actions.append(verdict_action_web)
-            logging.info(f"[ACTION] Evaluator: {verdict_action_web.action_type} - {verdict_action_web.content if verdict_action_web.content else verdict_action_web.target_agent}")
-            
-        return entity_action, observation, web_search_actions, verdict_actions
-    
     
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation"""
@@ -269,14 +232,11 @@ class InterrogationEnv:
         self.agents['questioner'].update_memory(role="user", content=interviewee_res.content) 
         self.agents['evaluator'].update_memory(role="user", content=interviewee_res.content)
 
-        entity_action, observation, web_search_actions, verdict_action = self.consistency_check(
-            interviewee_res.question,
-            interviewee_res.content
-        )
+        entity_action, observation, web_search_actions = self.check_external(f"Question: {interviewee_res.question}\nResponse: {interviewee_res.content}")
 
         self.state.current_turn += 1
 
-        actions = [question_act, entity_action, *web_search_actions, *verdict_action] if web_search_actions else [question_act, entity_action, *verdict_action]
+        actions = [question_act, entity_action, *web_search_actions] if web_search_actions else [question_act, entity_action]
         res_ob = Observation(observation_type="interviewee_response", response=interviewee_res)
         observations = [res_ob, observation] if observation else [res_ob]
         turn = Turn(
@@ -317,8 +277,6 @@ class InterrogationEnv:
 
     def finalize(self):
         """repeat stage: repeat the pre-defined questions to check for consistency"""
-        
-        
         for i, q in enumerate(self.predefined_questions):
             logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
             response = self.interviewee.get_response(f"Just to clarify, {q['question']}")
@@ -386,21 +344,6 @@ class InterrogationEnv:
             "agent_memory": {
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
-            "first_conflict_turn": self.first_conflict_turn,
-            "external_consistency": {
-                "total_evaluations": self.external_count,
-                "conflict_count": self.external_conflict,
-                "plausible_count": self.external_plausible,
-                "consistency_rate": self.external_plausible / self.external_count if self.external_count > 0 else 0,
-                "conflict_verdicts": self.external_conflict_verdicts
-            },
-            "internal_consistency": {
-                "total_evaluations": self.internal_count,
-                "conflict_count": self.internal_conflict,
-                "plausible_count": self.internal_plausible,
-                "consistency_rate": self.internal_plausible / self.internal_count if self.internal_count > 0 else 0,
-                "conflict_verdicts": self.internal_conflict_verdicts
-            },
             "repeat":{
                 "repeat_score": self.repeat_score,
                 "repeat_results": self.repeat_results
@@ -410,11 +353,10 @@ class InterrogationEnv:
         
         logging.info(f"Saving final result to {path}")
         
-        logging.info("Cost: (agent) :" + ", ".join([f"{agent_name}: ${agent.cost}" for agent_name, agent in self.agents.items()]))
+        logging.info("Cost: (agent):" + ", ".join([f"{agent_name}: ${agent.cost}" for agent_name, agent in self.agents.items()]))
         logging.info(f"Cost: (interviewee): ${interviewee_cost}")
         logging.info(f"Cost: (environment): ${self.env_cost}")
-        
-        logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
+        logging.info(f"Total cost: ${final_result['cost']['total_cost']}, Duration: {final_result['duration']}")
         logging.info(f"External consistency: {final_result['external_consistency']['consistency_rate']}")
         logging.info(f"Internal consistency: {final_result['internal_consistency']['consistency_rate']}")
         logging.info(f"Repeat score: {final_result['repeat']['repeat_score']}")

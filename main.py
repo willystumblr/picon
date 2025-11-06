@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
     parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'human_interview'])
-    parser.add_argument('--model', type=str, default=None, help='Model name for the interrogation.')
+    parser.add_argument('--model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the interrogation.')
     parser.add_argument('--nhd_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the NHD detector in the interviewee simulator.')
     parser.add_argument('--hs_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the Human Simulacra interviewee simulator.')
     parser.add_argument('--num_turns', type=int, default=30, help='Maximum number of turns in the interrogation.')

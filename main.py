@@ -21,6 +21,7 @@ def parse_args():
     parser.add_argument('--nhd_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the NHD detector in the interviewee simulator.')
     parser.add_argument('--hs_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the Human Simulacra interviewee simulator.')
     parser.add_argument('--num_turns', type=int, default=30, help='Maximum number of turns in the interrogation.')
+    parser.add_argument('--max_workers', type=int, default=5, help='Maximum number of workers for the interrogation.')
     parser.add_argument('--sample', action='store_true', help='Whether to sample OpenCharacter personas.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for sampling personas.')
     parser.add_argument('--log_to_file', action='store_true', help='Whether to log to a file.')
@@ -139,7 +140,7 @@ if __name__ == "__main__":
                 logging.info("Invalid input. Please enter Y or N.")
     
     executor_type = ProcessPoolExecutor if args.baseline_name == "opencharacter" else ThreadPoolExecutor
-    with executor_type(max_workers=5) as executor:
+    with executor_type(max_workers=args.max_workers) as executor:
         futures = {executor.submit(main, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
         for future in as_completed(futures):
             interviewee_kwarg = futures[future]

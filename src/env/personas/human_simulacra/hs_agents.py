@@ -78,7 +78,9 @@ class Memory_agent:
         messages.append(HumanMessage(content=user_prompt))
 
         # Generate summary
-        summary = self.sum(messages).content
+        with get_openai_callback() as cb:
+            summary = self.sum(messages).content
+            self.cost += cb.total_cost
         return summary
 
     def Save_index_file(self, index):
@@ -271,6 +273,7 @@ class Thinking_agent:
         messages.append(HumanMessage(content=user_prompt))
         with get_openai_callback() as cb:
             Thinking_result = self.think.invoke(messages)
+            self.cost += cb.total_cost
             
         return Thinking_result.content
 
@@ -398,7 +401,11 @@ class Top_agent:
             print(Fore.RED + "Long memory not found. Constructing long memory..." + Style.RESET_ALL)
             self.long_memory_construction()
             print(Fore.RED + "Long memory construction completed." + Style.RESET_ALL)
-        
+    
+    def calculate_cost(self):
+        total_cost = self.Thinking_Agent.cost + self.Emotion_Agent.cost + self.Memory_Agent.cost + self.cost
+        return total_cost
+    
     def add_new_attributes(self, new_attributes):
         ## adding new character attributes to the character's profile
         if not isinstance(new_attributes, dict):
@@ -521,7 +528,7 @@ class Top_agent:
             memory_retrieval = self.Memory_Agent.Memory_Retrieval(query)
             thinking = self.Thinking_Agent.Thinking_analysis(query)
             emotion = self.Emotion_Agent.Emotion_analysis(query)
-            self.cost += self.Memory_Agent.cost + self.Thinking_Agent.cost + self.Emotion_Agent.cost 
+            # self.cost += self.Memory_Agent.cost + self.Thinking_Agent.cost + self.Emotion_Agent.cost 
 
             
             if memory_retrieval:
@@ -544,7 +551,9 @@ class Top_agent:
                 )
             
             current_messages.append(SystemMessage(content=user_prompt))
-            agents_ans = self.chat(current_messages).content
+            with get_openai_callback() as cb:
+                agents_ans = self.chat(current_messages).content
+                # self.cost += cb.total_cost
             print(Fore.GREEN + agents_ans + Style.RESET_ALL)
             chat_history.append("The other person: " + query)
             chat_history.append("You: " + agents_ans)
@@ -572,8 +581,6 @@ class Top_agent:
         memory_retrieval = self.Memory_Agent.Memory_Retrieval(message)
         thinking = self.Thinking_Agent.Thinking_analysis(message)
         emotion = self.Emotion_Agent.Emotion_analysis(message)
-        logging.info(f"{self.Memory_Agent.cost}, {self.Thinking_Agent.cost}, {self.Emotion_Agent.cost}")
-        self.cost += self.Memory_Agent.cost + self.Thinking_Agent.cost + self.Emotion_Agent.cost
         
         if memory_retrieval:
             memory = str(memory_retrieval)
@@ -625,14 +632,14 @@ class Top_agent:
         # Flatten the list of lists
         
         with get_openai_callback() as cb:
-            agents_ans = self.chat.invoke([self.system_prompt] + flattened_messages).content
+            agents_ans = self.chat.invoke([self.system_prompt] + flattened_messages).content # solely for the top agent
             self.cost += cb.total_cost
         
         temp_chat_history.append("The other person: " + message)
         temp_chat_history.append("You: " + agents_ans)
         
         self.chat_history.append(temp_chat_history)
-
+        logging.info(f"mem: {self.Memory_Agent.cost}, think: {self.Thinking_Agent.cost}, emo: {self.Emotion_Agent.cost}, top: {self.cost}")
         return agents_ans
         
     def bandwagon_chat(self, query, chat_history=None):
@@ -676,7 +683,9 @@ class Top_agent:
             )
         
         messages.append(SystemMessage(content=user_prompt))
-        agents_ans = self.chat(messages)
+        with get_openai_callback() as cb:
+            agents_ans = self.chat.invoke(messages)
+            self.cost += cb.total_cost
         return agents_ans.content
     
     def evaluation_chat(self, query):

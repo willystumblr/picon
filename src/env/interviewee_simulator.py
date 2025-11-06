@@ -95,6 +95,12 @@ class IntervieweeSimulator:
         logging.error(f"All attempts failed. Errors:\n{error_message}")
         raise RuntimeError(f"Failed to get persona response after 3 attempts. Errors:\n{error_message}")
 
+    def calculate_cost(self):
+        if self.type == "human_simulacra":
+            return self.client_or_model.calculate_cost() + self.cost
+        else:
+            return self.cost
+
     def _get_response(self, message: str) -> IntervieweeResponse:
         if self.type == "characterai":
             # Add a small delay before sending message
@@ -111,7 +117,7 @@ class IntervieweeSimulator:
         
         elif self.type == "human_simulacra":
             response = self.client_or_model.send_message(message)
-            logging.info(f"Human Simulacra response cost so far: {self.client_or_model.cost:.6f} USD")
+            logging.info(f"Human Simulacra response cost so far: {self.client_or_model.calculate_cost():.6f} USD")
         
         elif self.type == "opencharacter": # OpenCharacter
             self.history.append({

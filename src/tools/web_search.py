@@ -1,7 +1,7 @@
 # google_claim_search.py
 import json
 import re
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, ClassVar
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from pydantic import BaseModel, Field
@@ -145,6 +145,7 @@ class GoogleClaimSearch(BaseModel):
     """
     api_key: str = Field(..., description="Google Custom Search API key")
     cx: str = Field(..., description="Google Programmable Search Engine ID")
+    tool_call_counts: ClassVar[int] = 0
 
     class Config:
         arbitrary_types_allowed = True
@@ -190,6 +191,7 @@ class GoogleClaimSearch(BaseModel):
             }
             resp = requests.get(search_url, params=q_params, timeout=6)
             resp.raise_for_status()
+            self.tool_call_counts += 1
             items = resp.json().get("items", [])
 
             results: List[Dict[str, Any]] = []
@@ -259,3 +261,13 @@ class GoogleClaimSearch(BaseModel):
                 },
             },
         }
+        
+    def calculate_cost(self) -> float:
+        # Custom Search API costs
+        # 100 queries per day are free
+        # $5 per 1000 queries thereafter
+        free_quota = 100
+        cost_per_1000 = 5.0
+        billable_calls = max(0, self.tool_call_counts - free_quota)
+        total_cost = (billable_calls / 1000) * cost_per_1000
+        return total_cost

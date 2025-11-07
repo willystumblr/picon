@@ -323,8 +323,9 @@ class InterrogationEnv:
         """save the current state to a json file"""
         agent_cost = sum(agent.cost for agent in self.agents.values())
         interviewee_cost = self.interviewee.calculate_cost()
-        total_cost = agent_cost + interviewee_cost + self.env_cost
-        
+        tool_costs = sum(tool.calculate_cost() for tool in self.tools.values())
+        total_cost = agent_cost + interviewee_cost + self.env_cost + tool_costs
+
         final_result={
             "agents_info":{agent_name: agent.model for agent_name, agent in self.agents.items()},
             "interviewee_info": {
@@ -335,6 +336,7 @@ class InterrogationEnv:
                 "agents_cost": agent_cost,
                 "interviewee_cost": interviewee_cost,
                 "environment_cost": self.env_cost,
+                "tool_costs": {tool_name: tool.calculate_cost() for tool_name, tool in self.tools.items()},
                 "total_cost": total_cost
             },
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes

@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 from dotenv import load_dotenv
 import argparse
 from src.utils import read_json, setup_logging, write_json, get_completion
@@ -8,49 +8,59 @@ from pydantic import BaseModel, Field
 import os
 import logging
 
-PROMPT = """You are a classifier that looks at a QA pair and determines whether the answer evades the question.
+PROMPT = """You are a precise abstain classifier.
 
-## Core Definition
-- Evasion: The answer does not provide any relevant information to the question.
-- Relevant information:
-- Self-related: facts, opinions, preferences, experiences, plans, or personal states (first-person information).
-- Topic-related: information, explanations, or statements that directly address the subject matter of the question.
-- If the answer provides even partial self-related or topic-related information, it is not evasion.
+# Task
+Decide whether the given answer *intentionally abstains* from answering the question.
 
+# Definition of Abstain
+An answer is **abstaining** ONLY IF:
+- It clearly refuses to answer (“I cannot answer that”, “I don’t know”, “I’m not allowed to say”, etc.), OR
+- It explicitly avoids the question (“That’s not relevant”, “Let’s talk about something else”), OR
+- It repeats or rephrases the question without giving new information, OR
+- It provides a generic or evasive statement that shows no intent to answer the question.
 
-## Classification Rules
-1.	Check what the question is asking for:
-    - If it asks for self-related information, look for self-info in the answer.
-    - If it asks about a topic, look for topic-related info in the answer.
-2.	If the answer contains relevant information (self-info or topic-related) → {"abstain": false, "abstain_type": "none"}
-3.	If the answer contains no relevant information, classify as evasion (abstain=true) and assign one type:
-    - "asking back" → A counter-question or deflection (e.g., “Why do you ask?”).
-    - "lack info" → Expressing uncertainty or ignorance (e.g., “I don’t know.”).
-    - "refusal" → Explicit refusal (e.g., “I don’t want to answer that.”).
-    - "unrelated" → Off-topic, jokes, ads, or irrelevant talk with no relevant content, including implicit refusal (e.g., descriptive answers to Y/N question without Y/N) or slightly changing the topic.
+# NOT Abstain
+An answer is **NOT abstaining** if:
+- It misunderstands the question but still tries to answer it,
+- It gives a wrong or irrelevant answer but in good faith,
+- It answers partially, incompletely, or with minor misunderstanding,
+- It speculates or guesses an answer (as long as it’s an attempt).
 
+# Output Format
+Return JSON:
+{
+  "abstain": true | false,
+  "reason": "short explanation",
+  "abstain_type": "refusal | lack info | asking back | unrelated"
+}
 
-## Priority (if multiple types apply)
-- Explicit refusal → "refusal"
-- Uncertainty/ignorance → "lack info"
-- Counter-question → "asking back"
-- Otherwise (irrelevant/off-topic) → "unrelated"
+# Example
+Q: "Exact role title on SNUBH contract?"
+A: "My role is to develop a Real-Time Prediction and Early Intervention Model..."
+→ This is a **misunderstanding**, not abstain.
+Output:
+{
+  "abstain": false,
+  "reason": "The answer misunderstands the question but attempts to answer.",
+  "abstain_type": null
+}
 
+Q: "What is your position at SNUBH?"
+A: "I’m not allowed to disclose that information."
+→ True abstain.
+Output:
+{
+  "abstain": true,
+  "reason": "The answer explicitly refuses to answer.",
+  "abstain_type": "refusal"
+}
 
-## Edge Cases
-- Short but relevant info = not evasion (e.g., “Seoul.”).
-- Vague but relevant info = not evasion (e.g., “Maybe tomorrow.”).
-- General statements unrelated to question = evasion.
-- Jokes/metaphors with no relevant info = "unrelated".
-
-
-## Output Format (must match exactly)
-
-{"abstain": <true|false>, "abstain_type": "<refusal|lack info|asking back|unrelated|none>"}
 """
 class OutputSchema(BaseModel):
-    abstain: bool = Field(..., description="Whether the provided response is abstaining from answering the question.")
-    abstain_type: str = Field(..., description="The type of abstention (e.g., 'lack info', 'unknown', etc.).")
+    abstain: Literal['true', 'partially true', 'false'] = Field(..., description="Whether the provided response is abstaining from answering the question.")
+    reason : str = Field(..., description="A brief explanation for the abstention decision.")
+    abstain_type: Literal['none', 'refusal', 'lack info', 'asking back', 'unrelated'] = Field(..., description="The type of abstention (e.g., 'lack info', 'unknown', etc.).")
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -64,7 +74,7 @@ def parse_arguments() -> argparse.Namespace:
 def abstain_eval(args: argparse.Namespace):
     logging.info("Loading input data...")
     input_data = read_json(args.input_file)
-    qa_pairs = [turn['environment_observation'][-1]['response'] for turn in input_data['history'] if turn['environment_observation'][-1]['observation_type']=="interviewee_response" and turn['type']!="repeat"]
+    qa_pairs = [turn['environment_observation'][0]['response'] for turn in input_data['history'] if turn['environment_observation'][0]['observation_type']=="interviewee_response" and turn['type']!="repeat"]
     result_dict = {
         "model": args.model,
         "results":[]
@@ -85,12 +95,14 @@ def abstain_eval(args: argparse.Namespace):
                     }
                 ],
                 response_format=OutputSchema,
-                temperature=0.0
+                temperature=1.0
             ), qa_pairs), total=len(qa_pairs), desc="Evaluating QA pairs")
         )
 
     logging.info("Evaluation completed.")
-    total_abstain_count = sum(1 for res in results if res.choices[0].message.content and OutputSchema.model_validate_json(res.choices[0].message.content).abstain)    
+    
+    outputs = [OutputSchema.model_validate_json(res.choices[0].message.content) if res.choices[0].message.content else None for res in results]
+    total_abstain_count = sum(1 for res in outputs if res and res.abstain!='false')    
     print(f"Total abstentions: {total_abstain_count} out of {len(qa_pairs)}")
     for i, res in enumerate(results):
         content = res.choices[0].message.content
@@ -100,8 +112,10 @@ def abstain_eval(args: argparse.Namespace):
             "question": qa_pairs[i]['question'],
             "answer": qa_pairs[i]['content'],
             "abstain": parsed_content.abstain,
+            "reason": parsed_content.reason,
             "abstain_type": parsed_content.abstain_type
         })
+    result_dict['abstain_rate'] = total_abstain_count / len(qa_pairs)
     logging.info(f"Results saved to {args.output_dir}")
     output_filename = os.path.basename(args.input_file).replace('.json', '_abstain_results.json')
     write_json(result_dict, os.path.join(args.output_dir, args.baseline_name, output_filename))

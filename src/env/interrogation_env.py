@@ -39,9 +39,9 @@ class InterrogationEnv:
         if not agents:
             logging.warning("No agents provided. Initializing default agents.")
             agents = {
-                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt"),
-                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt"),
-                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt"),
+                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt", model=model),
+                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
+                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=model),
                 "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=model),
             }
         self.agents = agents
@@ -133,7 +133,6 @@ class InterrogationEnv:
             else:
                 turn = Turn(type='get_to_know', agent_action=[action], environment_observation=[res_observation])
             self.state.history.append(turn)
-
         return self.state
 
     def check_external(self, message : str) -> bool:
@@ -357,8 +356,6 @@ class InterrogationEnv:
         logging.info(f"Cost: (interviewee): ${interviewee_cost}")
         logging.info(f"Cost: (environment): ${self.env_cost}")
         logging.info(f"Total cost: ${final_result['cost']['total_cost']}, Duration: {final_result['duration']}")
-        logging.info(f"External consistency: {final_result['external_consistency']['consistency_rate']}")
-        logging.info(f"Internal consistency: {final_result['internal_consistency']['consistency_rate']}")
         logging.info(f"Repeat score: {final_result['repeat']['repeat_score']}")
 
 if __name__ == "__main__":

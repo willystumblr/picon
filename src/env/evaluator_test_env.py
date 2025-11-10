@@ -49,10 +49,6 @@ class EvaluatorTestEnv:
         self.external_conflict_verdicts = []
         self.first_conflict_turn = None
         
-        system_message_path = f"{project_root}/src/agents/prompts/evaluator_prompt.txt"
-        self.system_prompt = open(system_message_path).read()
-        self.evaluator_history[0]['content'] = self.system_prompt
-        
     def reset(self):
         """reset the environment"""
         # self.state = State(current_turn=1, history=[]) # n-th turn indicates the n-th user response

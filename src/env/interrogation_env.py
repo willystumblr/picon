@@ -39,7 +39,7 @@ class InterrogationEnv:
         if not agents:
             logging.warning("No agents provided. Initializing default agents.")
             agents = {
-                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/examiner_prompt_2.txt", model=model),
+                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=model),
                 "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
                 "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=model),
                 "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=model),
@@ -59,7 +59,7 @@ class InterrogationEnv:
         self.predefined_questions = read_json(question_path)
         self.instruction = open(instruction_path).read()
         self.state = State(current_turn=0, history=[])
-        self.cutoff_date = None
+        self.cutoff_date = time.strftime("%B %d, %Y")
         self.start_time = time.time()
         self.env_cost = 0.0
 
@@ -91,6 +91,10 @@ class InterrogationEnv:
 
     def reset(self):
         """run predefined questions to initialize the interview state"""
+        self.agents['questioner'].set_cutoff_date(self.cutoff_date)
+        self.agents['web_search'].set_cutoff_date(self.cutoff_date)
+        self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
+        self.instruction = self.instruction.format(cutoff_date=self.cutoff_date)
         # feed interview instruction to the interviewee
         logging.info(f"[INSTRUCTION] {self.instruction}")
         response = self.interviewee.get_response(self.instruction)
@@ -99,12 +103,7 @@ class InterrogationEnv:
         for i, q in enumerate(self.predefined_questions):
             logging.info(f"[QUESTION] {q['question']}")
             response = self.interviewee.get_response(q['question'])
-            logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
-            if i == 0:
-                # firt turn defines the cutoff date
-                self.cutoff_date = response.content
-                self.agents['questioner'].set_cutoff_date(self.cutoff_date)
-                self.agents['web_search'].set_cutoff_date(self.cutoff_date)
+            logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")    
             # update state
             action = Action(action_type="respond", content=q['question'])
             res_observation = Observation(
@@ -120,18 +119,17 @@ class InterrogationEnv:
             self.agents['questioner'].update_memory(role="assistant", content=q['question'])
             self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
-            if i > 0:
-                entity_action, web_observations, web_search_actions = self.check_external(
-                    f"Question: {q['question']}\nResponse: {response.content}"
-                )
-                # for verdict_action in verdict_actions:
-                #     self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
-                if web_search_actions:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions], environment_observation=[res_observation, *web_observations])
-                else:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action], environment_observation=[res_observation])
+            
+            entity_action, web_observations, web_search_actions = self.check_external(
+                f"Question: {q['question']}\nResponse: {response.content}"
+            )
+            # for verdict_action in verdict_actions:
+            #     self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
+            if web_search_actions:
+                turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions], environment_observation=[res_observation, *web_observations])
             else:
-                turn = Turn(type='get_to_know', agent_action=[action], environment_observation=[res_observation])
+                turn = Turn(type='get_to_know', agent_action=[entity_action], environment_observation=[res_observation])
+            
             self.state.history.append(turn)
         return self.state
 
@@ -291,7 +289,7 @@ class InterrogationEnv:
                 "is_repeat": judge
             })
             self.repeat_score += (judge=='TRUE')
-        self.repeat_score = round(self.repeat_score / (len(self.predefined_questions)-1), 4)
+        self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
         return self.state
         
     
@@ -342,18 +340,18 @@ if __name__ == "__main__":
     load_dotenv()
     
     env = InterrogationEnv(
+        model="gpt-5",
         baseline_name="characterai",
         character_id="6HhWfeDjetnxESEcThlBQtEUo0O8YHcXyHqCgN7b2hY", # example character id
-        user_id="YOUR_USER_ID",
+        user_id=os.getenv('CAI_API_KEY'),
         name="Elon Musk",
         tools={
             "google_claim_search": GoogleClaimSearch(
-                api_key='YOUR_API_KEY',
-                cx='YOUR_CX'
+                api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
+                cx=os.getenv('GOOGLE_CX_ID'),
             ),
-            "google_geocode_validate": GoogleGeocodeValidate(api_key='YOUR_API_KEY')
+            "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
         },
-        max_turns=30
     )
     state = env.reset()
     done = False

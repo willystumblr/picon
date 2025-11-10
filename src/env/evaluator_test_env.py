@@ -61,31 +61,40 @@ class EvaluatorTestEnv:
 
     def _find_turn_idx(self, idx) -> int:
         """find the turn index in self.history corresponding to the idx-th user response in self.evaluator_history"""
-        turn_idx = next(
-            (i for i, turn in enumerate(self.history)
-                if any(env_obs['response']['content'] == self.evaluator_history[idx]['content']
-                    for env_obs in turn['environment_observation']
-                    if env_obs['observation_type'] == "interviewee_response")),
-            None
-        )
+        turn_idx = None
+        user_response = self.evaluator_history[idx]['content']
+        for i, turn in enumerate(self.history):
+            if turn['type'] != 'repeat':
+                for env_obs in turn['environment_observation']:
+                    if env_obs["observation_type"] == "interviewee_response":
+                        if env_obs["response"]["content"] == user_response:
+                            turn_idx = i
+                            break
         return turn_idx
 
     def score_conflict(self, idx, verdict_action: Action):
         if verdict_action.content['verdict'] == 'conflict': # verdict_action.content['ground'] == 'internal':
             turn_idx = self._find_turn_idx(idx)
+            question = self.history[turn_idx]['environment_observation'][0]['response']['question']
+            response = self.history[turn_idx]['environment_observation'][0]['response']['content']
+            logging.info(f"[EVALUATOR] Conflict detected at turn {turn_idx} for Question: {question}, Response: {response}")
             if verdict_action.content['ground'] == 'internal':
                 self.internal_count += 1
                 self.internal_conflict += 1
                 self.internal_conflict_verdicts.append({
                     "turn": turn_idx,
-                    "verdict": verdict_action.content
+                    "question": question,
+                    "response": response,
+                    "verdict": verdict_action.content,
                 })
             else:
                 self.external_count += 1
                 self.external_conflict += 1
                 self.external_conflict_verdicts.append({
                     "turn": turn_idx,
-                    "verdict": verdict_action.content
+                    "question": question,
+                    "response": response,
+                    "verdict": verdict_action.content,
                 })
             if self.first_conflict_turn is None:
                 self.first_conflict_turn = turn_idx
@@ -124,7 +133,7 @@ class EvaluatorTestEnv:
                 messages_list
             )))
         
-        for idx, verdict in enumerate(verdicts):
+        for idx, verdict in zip(self.user_indices, verdicts):
             self.env_cost += completion_cost(verdict)
             try:
                 response = EvaluationResponse.model_validate_json(verdict.choices[0].message.content)

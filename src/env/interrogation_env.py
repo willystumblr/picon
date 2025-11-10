@@ -121,13 +121,13 @@ class InterrogationEnv:
             self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
             if i > 0:
-                entity_action, web_observation, web_search_actions = self.check_external(
+                entity_action, web_observations, web_search_actions = self.check_external(
                     f"Question: {q['question']}\nResponse: {response.content}"
                 )
                 # for verdict_action in verdict_actions:
                 #     self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
                 if web_search_actions:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions], environment_observation=[res_observation, web_observation])
+                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions], environment_observation=[res_observation, *web_observations])
                 else:
                     turn = Turn(type='get_to_know', agent_action=[entity_action], environment_observation=[res_observation])
             else:
@@ -135,8 +135,9 @@ class InterrogationEnv:
             self.state.history.append(turn)
         return self.state
 
-    def check_external(self, message : str) -> bool:
+    def check_external(self, message : str) -> tuple[Action, List[Observation], List[Action]]:
         # 1. Extractor first extracts the entity & claim to verify
+        observations = []
         next_action = self.agents["extractor"].act(message)
         logging.info(f"[ACTION] Extractor: {next_action.action_type} - {next_action.content if next_action.content else next_action.target_agent}")
         if next_action.action_type == "next_agent":
@@ -144,7 +145,6 @@ class InterrogationEnv:
                 logging.error("Extractor can only pass to Questioner.")
                 return self.state, True
             logging.info("No entity or claim extracted. Passing to Questioner.")
-            observation = None
             filtered_actions = []
         elif next_action.action_type == "respond": # should be respond with entity & claim
             if next_action.content is None:
@@ -168,11 +168,11 @@ class InterrogationEnv:
             if filtered_actions:
                 with ThreadPoolExecutor(max_workers=len(filtered_actions)) as executor:
                     tool_outputs = list(executor.map(self.invoke_tool, filtered_actions))
-                
-                observation = Observation(
+
+                observations.append(Observation(
                     observation_type="tool_output",
                     tool_output=tool_outputs
-                )
+                ))
 
                 for i, output in enumerate(tool_outputs):
                     sub_message = [
@@ -204,17 +204,19 @@ class InterrogationEnv:
                     logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
                     response = self.interviewee.get_response(confirmation_question)
                     logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
-                    
+                    observations.append(Observation(
+                        observation_type="interviewee_response",
+                        response=response
+                    ))
                     self.agents['evaluator'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
                     self.agents['evaluator'].update_memory(role="user", content=response.content) ####### 여기 #######
                     
                     
             else:
-                observation = None
                 filtered_actions = []
-        return next_action, observation, filtered_actions
-    
-    
+        return next_action, observations, filtered_actions
+
+
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation"""
         if self.state.current_turn >= self.max_turns:
@@ -231,13 +233,13 @@ class InterrogationEnv:
         self.agents['questioner'].update_memory(role="user", content=interviewee_res.content) 
         self.agents['evaluator'].update_memory(role="user", content=interviewee_res.content)
 
-        entity_action, observation, web_search_actions = self.check_external(f"Question: {interviewee_res.question}\nResponse: {interviewee_res.content}")
+        entity_action, observations, web_search_actions = self.check_external(f"Question: {interviewee_res.question}\nResponse: {interviewee_res.content}")
 
         self.state.current_turn += 1
 
         actions = [question_act, entity_action, *web_search_actions] if web_search_actions else [question_act, entity_action]
         res_ob = Observation(observation_type="interviewee_response", response=interviewee_res)
-        observations = [res_ob, observation] if observation else [res_ob]
+        observations = [res_ob, *observations]
         turn = Turn(
             type='main_interrogation',
             agent_action=actions,
@@ -247,32 +249,6 @@ class InterrogationEnv:
         self.state.history.append(turn)
 
         return self.state, False
-
-    def score_conflict(self, verdict_action: Action):
-        if verdict_action.content['verdict'] == 'conflict': # verdict_action.content['ground'] == 'internal':
-            if verdict_action.content['ground'] == 'internal':
-                self.internal_count += 1
-                self.internal_conflict += 1
-                self.internal_conflict_verdicts.append({
-                    "turn": self.state.current_turn,
-                    "verdict": verdict_action.content
-                })
-            else:
-                self.external_count += 1
-                self.external_conflict += 1
-                self.external_conflict_verdicts.append({
-                    "turn": self.state.current_turn,
-                    "verdict": verdict_action.content
-                })
-            if self.first_conflict_turn is None:
-                self.first_conflict_turn = self.state.current_turn
-        else:
-            if verdict_action.content['ground'] == 'internal':
-                self.internal_count += 1
-                self.internal_plausible += 1
-            else:
-                self.external_count += 1
-                self.external_plausible += 1
 
     def finalize(self):
         """repeat stage: repeat the pre-defined questions to check for consistency"""

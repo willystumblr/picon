@@ -56,31 +56,39 @@ class EvaluatorTestEnv:
     def reset(self):
         """reset the environment"""
         # self.state = State(current_turn=1, history=[]) # n-th turn indicates the n-th user response
-        #breakpoint()
         self.user_indices = [i for i in range(0, len(self.evaluator_history)) if self.evaluator_history[i]['role']=='user'] # every 3 turns correspond to one user response
         self.user_indices.pop(0)  # remove the first user input which is the initial question
 
-    
+    def _find_turn_idx(self, idx) -> int:
+        """find the turn index in self.history corresponding to the idx-th user response in self.evaluator_history"""
+        turn_idx = next(
+            (i for i, turn in enumerate(self.history)
+                if any(env_obs['response']['content'] == self.evaluator_history[idx]['content']
+                    for env_obs in turn['environment_observation']
+                    if env_obs['observation_type'] == "interviewee_response")),
+            None
+        )
+        return turn_idx
+
     def score_conflict(self, idx, verdict_action: Action):
         if verdict_action.content['verdict'] == 'conflict': # verdict_action.content['ground'] == 'internal':
+            turn_idx = self._find_turn_idx(idx)
             if verdict_action.content['ground'] == 'internal':
                 self.internal_count += 1
                 self.internal_conflict += 1
                 self.internal_conflict_verdicts.append({
-                    "turn": 0,#self.state.current_turn,
+                    "turn": turn_idx,
                     "verdict": verdict_action.content
                 })
             else:
                 self.external_count += 1
                 self.external_conflict += 1
                 self.external_conflict_verdicts.append({
-                    "turn": 0,#self.state.current_turn,
+                    "turn": turn_idx,
                     "verdict": verdict_action.content
                 })
-            # if self.first_conflict_turn is None:
-            #     # find the corresponding user response turn
-            #     turn_idx = next(i for i, turn in enumerate(self.history) if turn['environment_observation'][0]['response'] == self.evaluator_history[idx]['content'])
-            #     self.first_conflict_turn = turn_idx
+            if self.first_conflict_turn is None:
+                self.first_conflict_turn = turn_idx
         else:
             if verdict_action.content['ground'] == 'internal':
                 self.internal_count += 1
@@ -110,7 +118,6 @@ class EvaluatorTestEnv:
             self.evaluator_history[:i+1] for i in self.user_indices
         ]
         logging.info(f"[EVALUATOR] Evaluating {len(messages_list)} user responses for internal consistency.")
-        #breakpoint()
         with ThreadPoolExecutor(max_workers=16) as executor:
             verdicts = list(tqdm(executor.map(
                 lambda messages: self.generate_verdict(messages),
@@ -124,7 +131,6 @@ class EvaluatorTestEnv:
             except Exception as e:
                 logging.error(f"[EVALUATOR] Validation error at index {idx}: {e}")
                 logging.info(f"[EVALUATOR] Raw response: {verdict.choices[0].message.content}")
-                breakpoint()
                 
             content = response.model_dump()
             logging.info(f"[EVALUATOR] Verdict: {content['verdict']}, Ground: {content['ground']}, Rationale: {content['rationale']}")

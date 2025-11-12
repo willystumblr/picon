@@ -34,6 +34,7 @@ class EvaluatorTestEnv:
         self.interview_path = interview_path
         data = read_json(interview_path)
         self.evaluator_history = data["agent_memory"]["evaluator"]
+        self.evaluator_history = [self.evaluator_history[i] for i in range(len(self.evaluator_history)) if self.evaluator_history[i-1]!=self.evaluator_history[i] or i==0]
         self.history = data['history']
         
         self.repeat_results = data['repeat'].get('repeat_results', [])

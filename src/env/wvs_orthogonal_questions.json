@@ -1,9 +1,5 @@
 [
     {
-        "id": "Q_0",
-        "question": "What date is it today? Can you tell me the current date, month and year?"
-    },
-    {
         "id": "Q_1",
         "question": "Can you tell me your year of birth, please?"
     },

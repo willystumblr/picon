@@ -7,3 +7,10 @@
 *.ipynb
 *.sh
 *.tar.gz
+temp/
+assets/
+data/
+logs/
+**/__pycache__/
+.vscode/
+scripts/

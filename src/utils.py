@@ -14,7 +14,7 @@ def read_json(file_path: str) -> Any:
     with open(file_path, "r") as f:
         return json.load(f)
 def write_json(data: Any, file_path: str) -> None:
-    if not os.path.exists(os.path.dirname(file_path)):
+    if os.path.dirname(file_path) and not os.path.exists(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)

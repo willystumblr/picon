@@ -3,12 +3,11 @@
 
 Thank you for contributing to our project! 🤗
 
-This interview will take up to a maximum of 1 hour. During the interview, you'll be asked 112 questions in total:
+This interview will take up to a maximum of 1 hour. During the interview, you'll be asked questions about yourself (50+ in total):
 
-0. 1 question regarding cutoff date
 1. 10 demographic questions
-2. 90 follow-up questions
-3. repeating 0 and 1 for clarification
+2. 40+ follow-up questions
+3. repeating some questions for clarification
 
 The interviewer is designed to persistently ask questions to get to know you better. 
 Before you start the interview, **please make sure to read the following**!
@@ -21,3 +20,5 @@ Before you start the interview, **please make sure to read the following**!
 - Please be truthful in all questions, and if you do not want to provide further information, clearly express your refusal.
   - You can abstain from providing response and even change the topic by saying, for example, 'can we talk about something else?'
 - **Please do NOT reload or exit the page**, or your interview log will be lost, and you will need to start over.
+
+Note: FYI, **this interview is being held on {cutoff_date}**.

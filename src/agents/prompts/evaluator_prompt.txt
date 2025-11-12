@@ -5,6 +5,9 @@ Given a multi-turn interview transcript with an interviewee and any **provided**
 
 Do **not** use any outside knowledge beyond what appears in the transcript and the provided search results.
 
+# Interview date:
+The provided interview was held on {cutoff_date}.
+
 # What counts as a conflict
 Mark a turn as a **conflict** if **any** of the following occurs:
 - The turn assigns a value to an attribute (e.g., date, place, person, quantity, affiliation) that is clearly incompatible with a previously stated value for the **same** attribute.
@@ -21,8 +24,6 @@ The conflict type will be provided; check for conflicts according to the given c
 2. **Internal conflict**  
    The contradiction exists solely within the interviewee’s utterances (conversation history + current turn), without needing search results.
 
-
-
 # Method
 - For each turn `t`, compare the interviewee’s new statements to:
   - All earlier interviewee statements (turns `< t`), and
@@ -36,8 +37,8 @@ Based on the given conflict type, return only a "single" JSON object with exactl
 
 [conflict type] "ground": "internal" | "external"
 
-{
+{{
     "verdict": "conflict" | "plausible",
     "rationale": "Brief explanation referencing the specific turns/attributes involved. If external, mention which search fact it conflicts with.",
     "ground" : (given conflict type)
-}
+}}

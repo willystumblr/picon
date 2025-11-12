@@ -21,7 +21,7 @@ class EvaluatorAgent(Agent):
         )
 
     def set_cutoff_date(self, cutoff_date: str) -> None:
-        self.memory[0]['content'] = self.memory[0]['content'].format(current_date=cutoff_date)
+        self.memory[0]['content'] = self.memory[0]['content'].format(cutoff_date=cutoff_date)
 
     def update_memory(self, **kwargs) -> None:
         if kwargs.get('index') is not None:

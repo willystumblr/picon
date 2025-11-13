@@ -188,7 +188,7 @@ class InterrogationEnv:
                     messages = [
                         {
                             "role": "system",
-                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results, e.g., \"Based on the search result, Google is ... Is the company what you meant? Please respond with 'yes' or 'no'.\""
+                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results.\""
                         },
                     ]
                     messages.extend(sub_message)
@@ -290,6 +290,8 @@ class InterrogationEnv:
             })
             self.repeat_score += (judge=='TRUE')
         self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
+        if self.interviewee.baseline_name == "characterai":
+            self.interviewee.close()
         return self.state
         
     

@@ -13,7 +13,7 @@ class GoogleGeocodeValidate(BaseModel):
     failures—is **invalid**. """
 
     api_key: str = Field(..., description="Google Maps Geocoding API key")
-    tool_call_counts: ClassVar[int] = 0
+    tool_call_counts: int = 0
 
     # ---------------------------------------------------------------------
     # Internal helpers

@@ -7,6 +7,7 @@ from markdownify import markdownify as md
 from pydantic import BaseModel, Field
 import requests
 from rank_bm25 import BM25Okapi
+import cloudscraper
 
 TOP_K_RESULTS = 1         # how many search results to fetch        # how many passages to return
 _PAT = re.compile(r"(content|main|article|body|post)", re.I)
@@ -145,15 +146,21 @@ class GoogleClaimSearch(BaseModel):
     """
     api_key: str = Field(..., description="Google Custom Search API key")
     cx: str = Field(..., description="Google Programmable Search Engine ID")
-    tool_call_counts: ClassVar[int] = 0
+    tool_call_counts: int = 0
 
     class Config:
         arbitrary_types_allowed = True
 
     def _fetch(self, url: str) -> Dict[str, Any]:
         try:
-            page = requests.get(url, timeout=6,
-                                headers={"User-Agent": "Mozilla/5.0"})
+            scraper = cloudscraper.create_scraper(
+                browser={
+                    "browser": "chrome",
+                    "platform": "windows",
+                    "mobile": False
+                }
+            )
+            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"})
             page.raise_for_status()
             soup = BeautifulSoup(page.text, "html.parser")
             title = (soup.title.string or "").strip() if soup.title else ""

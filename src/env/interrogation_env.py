@@ -186,7 +186,7 @@ class InterrogationEnv:
                     observation_type="tool_output",
                     tool_output=tool_outputs
                 ))
-                prev_conf_qa = []
+                
                 for i, output in enumerate(tool_outputs):
                     sub_message = [
                         {
@@ -205,8 +205,6 @@ class InterrogationEnv:
                     """tool call 결과를 evaluator 메모리에 추가"""
                     self.agents['evaluator'].update_memory(**sub_message[1]) ####### 여기 #######
                     self.agents['evaluator'].update_memory(**sub_message[2]) ####### 여기 #######
-                    if prev_conf_qa:
-                        sub_message = sub_message + prev_conf_qa
                     messages = [
                         {
                             "role": "system",
@@ -214,7 +212,6 @@ class InterrogationEnv:
                                 "Ask a short, concise \"confirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
                                 "Assume that no further search is available beyond the provided search results. "
                                 "If search results are incomplete due to search failure or error, ask a generic confirmation question about the entity. "
-                                "If the search results are duplicate or redundant with previous questions, do not ask a new question; instead, responde with a single word-SKIP."
                                 "Generate a single question without any additional explanation. "
                             )
                         },
@@ -227,9 +224,6 @@ class InterrogationEnv:
                     )
                     self.env_cost += completion_cost(res)
                     confirmation_question = res.choices[0].message.content.strip()
-                    if not confirmation_question or confirmation_question.upper() == "SKIP":
-                        logging.info("No new confirmation question generated. Skipping.")
-                        continue
                     logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
                     response = self.interviewee.get_response(confirmation_question)
                     logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
@@ -242,14 +236,6 @@ class InterrogationEnv:
                     self.agents['questioner'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
                     self.agents['questioner'].update_memory(role="user", content=response.content) ####### 여기 #######
                     
-                    prev_conf_qa.append({
-                        "role": "assistant",
-                        "content": confirmation_question
-                    })
-                    prev_conf_qa.append({
-                        "role": "user",
-                        "content": response.content
-                    })
             else:
                 filtered_actions = []
         return next_action, observations, filtered_actions

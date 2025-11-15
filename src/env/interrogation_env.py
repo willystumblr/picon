@@ -62,7 +62,7 @@ class InterrogationEnv:
             baseline_name=baseline_name,
             **kwargs # simulator specific args (character_id, user_id, name for characterai; model_path, persona, profile for opencharacter; name for human_simulacra)
         )
-        self.max_turns = max_turns + 1
+        self.max_turns = max_turns
         questions = read_json(question_path)
         random.shuffle(questions)
         self.predefined_questions = questions
@@ -171,8 +171,13 @@ class InterrogationEnv:
             # 2. Web Search (optional)
             with ThreadPoolExecutor(max_workers=len(list_of_extractions)) as executor:
                 web_search_actions = list(executor.map(self.agents['web_search'].act, list_of_extractions, [history]*len(list_of_extractions)))
-            filtered_actions = [action for action in web_search_actions if action and action.action_type == "tool_call"]
-            
+            filtered_actions = []
+            filtered_actions_indices = []
+            for i, action in enumerate(web_search_actions): 
+                if action and action.action_type == "tool_call":
+                    filtered_actions.append(action)
+                    filtered_actions_indices.append(i)
+
             if filtered_actions:
                 with ThreadPoolExecutor(max_workers=len(filtered_actions)) as executor:
                     tool_outputs = list(executor.map(self.invoke_tool, filtered_actions))
@@ -181,24 +186,37 @@ class InterrogationEnv:
                     observation_type="tool_output",
                     tool_output=tool_outputs
                 ))
-
+                prev_conf_qa = []
                 for i, output in enumerate(tool_outputs):
                     sub_message = [
+                        {
+                            "role": "user",
+                            "content": message
+                        },
                         filtered_actions[i].tool_call.details,
                         {
                             "role": "tool",
                             "tool_call_id": output.tool_call_id,
                             "name": output.tool_name,
-                            "content": str(output.output)
+                            "content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nClaims: {list_of_extractions[filtered_actions_indices[i]]['claims']}\nRationale: {list_of_extractions[filtered_actions_indices[i]]['rationale']}\nSearch Result:{str(output.output)}"
                         }
                     ]
+                    
                     """tool call 결과를 evaluator 메모리에 추가"""
-                    self.agents['evaluator'].update_memory(**sub_message[0]) ####### 여기 #######
                     self.agents['evaluator'].update_memory(**sub_message[1]) ####### 여기 #######
+                    self.agents['evaluator'].update_memory(**sub_message[2]) ####### 여기 #######
+                    if prev_conf_qa:
+                        sub_message = sub_message + prev_conf_qa
                     messages = [
                         {
                             "role": "system",
-                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results.\""
+                            "content": (
+                                "Ask a short, concise \"confirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
+                                "Assume that no further search is available beyond the provided search results. "
+                                "If search results are incomplete due to search failure or error, ask a generic confirmation question about the entity. "
+                                "If the search results are duplicate or redundant with previous questions, do not ask a new question; instead, responde with a single word-SKIP."
+                                "Generate a single question without any additional explanation. "
+                            )
                         },
                     ]
                     messages.extend(sub_message)
@@ -209,6 +227,9 @@ class InterrogationEnv:
                     )
                     self.env_cost += completion_cost(res)
                     confirmation_question = res.choices[0].message.content.strip()
+                    if not confirmation_question or confirmation_question.upper() == "SKIP":
+                        logging.info("No new confirmation question generated. Skipping.")
+                        continue
                     logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
                     response = self.interviewee.get_response(confirmation_question)
                     logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
@@ -221,6 +242,14 @@ class InterrogationEnv:
                     self.agents['questioner'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
                     self.agents['questioner'].update_memory(role="user", content=response.content) ####### 여기 #######
                     
+                    prev_conf_qa.append({
+                        "role": "assistant",
+                        "content": confirmation_question
+                    })
+                    prev_conf_qa.append({
+                        "role": "user",
+                        "content": response.content
+                    })
             else:
                 filtered_actions = []
         return next_action, observations, filtered_actions
@@ -313,11 +342,11 @@ class InterrogationEnv:
         total_cost = agent_cost + interviewee_cost + self.env_cost + tool_costs
 
         final_result={
+            "interview_date": self.cutoff_date,
             "agents_info":{agent_name: agent.model for agent_name, agent in self.agents.items()},
             "interviewee_info": {
                 "name": self.interviewee.name,
                 "baseline": self.interviewee.type,
-                "interview_date": self.cutoff_date
             },
             "cost": {
                 "agents_cost": agent_cost,

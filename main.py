@@ -1,6 +1,7 @@
 import os
 from src.utils import setup_logging, read_json, write_json, get_user_input_with_timeout
 from src.env.interrogation_env import InterrogationEnv
+from src.env.evaluator_test_env import EvaluatorTestEnv
 from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
@@ -87,6 +88,34 @@ def main(args, interviewee_kwarg):
             reset_only = True
         session_result, status = run_session(args, env, reset_only=reset_only)
         results_complete[f"session_{session_idx + 1}"] = session_result
+    write_json(results_complete, result_path)
+    logging.info("Starting evaluation with EvaluatorTestEnv...")
+    evaluator_env = EvaluatorTestEnv(
+        model=args.model,
+        interview_path=results_complete
+    )
+    evaluator_env.reset()
+    evaluator_env.step()
+
+    results_complete["fist_conflict_turn"] = evaluator_env.first_conflict_turn
+    results_complete["external_consistency"] = {
+        "total_evaluations": evaluator_env.external_count,
+        "conflict_count": evaluator_env.external_conflict,
+        "plausible_count": evaluator_env.external_plausible,
+        "consistency_rate": (evaluator_env.external_plausible / evaluator_env.external_count) if evaluator_env.external_count > 0 else None,
+        "conflict_verdicts": evaluator_env.external_conflict_verdicts
+    }
+    results_complete["internal_consistency"] = {
+        "total_evaluations": evaluator_env.internal_count,
+        "conflict_count": evaluator_env.internal_conflict,
+        "plausible_count": evaluator_env.internal_plausible,
+        "consistency_rate": (evaluator_env.internal_plausible / evaluator_env.internal_count) if evaluator_env.internal_count > 0 else None,
+        "conflict_verdicts": evaluator_env.internal_conflict_verdicts
+    }
+    results_complete["inter_session_score"] = {
+        "inter_session_score": evaluator_env.inter_session_score,
+        "inter_session_results": evaluator_env.inter_session_results
+    }
     write_json(results_complete, result_path)
     logging.info(f"Saved results to {result_path}.")
 

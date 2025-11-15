@@ -36,7 +36,7 @@ class EvaluatorTestEnv:
         self.start_time = time.time()
         self.env_cost = 0.0
         self.interview_path = interview_path
-        all_data = read_json(interview_path)
+        all_data = read_json(interview_path) if isinstance(interview_path, str) else interview_path
         data = list(all_data.values())[0]  # first interview session per file
         self.num_sessions = len(all_data.keys())
         self.evaluator_history = data["agent_memory"]["evaluator"]

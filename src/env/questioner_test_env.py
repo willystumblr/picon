@@ -15,7 +15,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from itertools import combinations
-
+import random
 
 class QuestionerTestEnv:
     def __init__(
@@ -52,13 +52,17 @@ class QuestionerTestEnv:
             baseline_name=baseline_name,
             **kwargs # simulator specific args (character_id, user_id, name for characterai; model_path, persona, profile for opencharacter; name for human_simulacra)
         )
-        self.max_turns = max_turns + 1
-        self.predefined_questions = read_json(question_path)
+        self.max_turns = max_turns
+        self.predefined_questions = random.sample(read_json(question_path), k=5)
         self.instruction = open(instruction_path).read()
         self.state = State(current_turn=0, history=[])
-        self.cutoff_date = None
-        self.start_time = time.time()
+        self.cutoff_date = time.strftime("%B %d, %Y") # default to current date
+        self.start_time = None
         self.env_cost = 0.0
+        
+        self.agents['questioner'].set_cutoff_date(self.cutoff_date)
+        self.agents['web_search'].set_cutoff_date(self.cutoff_date)
+        self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
 
         # repeat
         self.repeat_score = 0
@@ -92,6 +96,8 @@ class QuestionerTestEnv:
 
     def reset(self):
         """run predefined questions to initialize the interview state"""
+        self.start_time = time.time()
+        self.instruction = self.instruction.format(cutoff_date=self.cutoff_date)
         # feed interview instruction to the interviewee
         logging.info(f"[INSTRUCTION] {self.instruction}")
         response = self.interviewee.get_response(self.instruction)
@@ -101,11 +107,7 @@ class QuestionerTestEnv:
             logging.info(f"[QUESTION] {q['question']}")
             response = self.interviewee.get_response(q['question'])
             logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
-            if i == 0:
-                # firt turn defines the cutoff date
-                self.cutoff_date = response.content
-                self.agents['questioner'].set_cutoff_date(self.cutoff_date)
-                self.agents['web_search'].set_cutoff_date(self.cutoff_date)
+            
             # update state
             action = Action(action_type="respond", content=q['question'])
             res_observation = Observation(
@@ -120,19 +122,18 @@ class QuestionerTestEnv:
             self.agents['questioner'].update_memory(role="assistant", content=q['question'])
             self.agents['evaluator'].update_memory(role="user", content=response.content)
             self.agents['questioner'].update_memory(role="user", content=response.content)
-            if i > 0:
-                entity_action, web_observation, web_search_actions = self.consistency_check(
-                    question=q['question'],
-                    answer=response.content
-                )
-                # for verdict_action in verdict_actions:
-                    # self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
-                if web_search_actions:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions], environment_observation=[res_observation, web_observation])
-                else:
-                    turn = Turn(type='get_to_know', agent_action=[entity_action], environment_observation=[res_observation])
+            
+            entity_action, web_observation, web_search_actions = self.consistency_check(
+                question=q['question'],
+                answer=response.content
+            )
+            # for verdict_action in verdict_actions:
+                # self.agents['questioner'].update_memory(**{"role":"assistant", "content": str(verdict_action.content)}) ####### 여기 #######
+            if web_search_actions:
+                turn = Turn(type='get_to_know', agent_action=[entity_action, *web_search_actions], environment_observation=[res_observation, web_observation])
             else:
-                turn = Turn(type='get_to_know', agent_action=[action], environment_observation=[res_observation])
+                turn = Turn(type='get_to_know', agent_action=[entity_action], environment_observation=[res_observation])
+            
             self.state.history.append(turn)
 
         return self.state
@@ -165,7 +166,12 @@ class QuestionerTestEnv:
             # 2. Web Search (optional)
             with ThreadPoolExecutor(max_workers=len(list_of_extractions)) as executor:
                 web_search_actions = list(executor.map(self.agents['web_search'].act, list_of_extractions, [history]*len(list_of_extractions)))
-            filtered_actions = [action for action in web_search_actions if action and action.action_type == "tool_call"]
+            filtered_actions = []
+            filtered_actions_indices = []
+            for i, action in enumerate(web_search_actions): 
+                if action and action.action_type == "tool_call":
+                    filtered_actions.append(action)
+                    filtered_actions_indices.append(i)
             
             if filtered_actions:
                 with ThreadPoolExecutor(max_workers=len(filtered_actions)) as executor:
@@ -175,24 +181,36 @@ class QuestionerTestEnv:
                     observation_type="tool_output",
                     tool_output=tool_outputs
                 )
-
+                prev_conf_qa = []
                 for i, output in enumerate(tool_outputs):
                     sub_message = [
+                        {
+                            "role": "user",
+                            "content": message
+                        },
                         filtered_actions[i].tool_call.details,
                         {
                             "role": "tool",
                             "tool_call_id": output.tool_call_id,
                             "name": output.tool_name,
-                            "content": str(output.output)
+                            "content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nClaims: {list_of_extractions[filtered_actions_indices[i]]['claims']}\nRationale: {list_of_extractions[filtered_actions_indices[i]]['rationale']}\nSearch Result:{str(output.output)}"
                         }
                     ]
                     """tool call 결과를 evaluator 메모리에 추가"""
-                    self.agents['evaluator'].update_memory(**sub_message[0]) ####### 여기 #######
                     self.agents['evaluator'].update_memory(**sub_message[1]) ####### 여기 #######
+                    self.agents['evaluator'].update_memory(**sub_message[2]) ####### 여기 #######
+                    if prev_conf_qa:
+                        sub_message = sub_message + prev_conf_qa
                     messages = [
                         {
                             "role": "system",
-                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results, e.g., \"Based on the search result, Google is ... Is the company what you meant? Please respond with 'yes' or 'no'.\""
+                            "content": (
+                                "Ask a short, concise \"confirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
+                                "Assume that no further search is available beyond the provided search results. "
+                                "If search results are incomplete due to search failure or error, ask a generic confirmation question about the entity. "
+                                "If the search results are duplicate or redundant with previous questions, do not ask a new question; instead, responde with a single word-SKIP."
+                                "Generate a single question without any additional explanation. "
+                            )
                         },
                     ]
                     messages.extend(sub_message)
@@ -203,13 +221,27 @@ class QuestionerTestEnv:
                     )
                     self.env_cost += completion_cost(res)
                     confirmation_question = res.choices[0].message.content.strip()
-                    logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
-                    response = self.interviewee.get_response(confirmation_question)
-                    logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
-                    
-                    self.agents['evaluator'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
-                    self.agents['evaluator'].update_memory(role="user", content=response.content) ####### 여기 #######
-                    
+                    if not confirmation_question or confirmation_question.upper() == "SKIP":
+                        logging.info("No new confirmation question generated. Skipping.")
+                        continue
+                    else:
+                        logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
+                        response = self.interviewee.get_response(confirmation_question)
+                        logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
+                        
+                        self.agents['evaluator'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
+                        self.agents['evaluator'].update_memory(role="user", content=response.content) ####### 여기 #######
+                        self.agents['questioner'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
+                        self.agents['questioner'].update_memory(role="user", content=response.content) ####### 여기 #######
+
+                        prev_conf_qa.append({
+                            "role": "assistant",
+                            "content": confirmation_question
+                        })
+                        prev_conf_qa.append({
+                            "role": "user",
+                            "content": response.content
+                        })
                     
             else:
                 observation = None
@@ -330,7 +362,7 @@ Do not output any additional explanation or text."""
                 "is_repeat": judge
             })
             self.repeat_score += (judge=='TRUE')
-        self.repeat_score = round(self.repeat_score / len(self.predefined_questions-1), 4)
+        self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
         return self.state
 
 if __name__ == "__main__":
@@ -367,9 +399,9 @@ if __name__ == "__main__":
         env = QuestionerTestEnv(
             model=args.model,
             baseline_name="characterai",
-            character_id="xUYbondr8di3UyRIbjdmmx1_BMLeUslf7KCA3N7h_hk", # example character id
+            character_id="6HhWfeDjetnxESEcThlBQtEUo0O8YHcXyHqCgN7b2hY", # example character id
             user_id=os.environ.get('CAI_API_KEY'),
-            name="John Smith",
+            name="Elon Musk",
             tools={
                 "google_claim_search": GoogleClaimSearch(
                     api_key=os.environ.get('GOOGLE_CLAIM_SEARCH'),

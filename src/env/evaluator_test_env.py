@@ -18,6 +18,10 @@ class EvaluationResponse(BaseModel):
     rationale: str  # explanation for the verdict
     ground: Literal['internal', 'external'] = Field(description="Ground for the verdict. If `internal`, the verdict is based on the internal context (i.e., the conversation history without external information). If `external`, it is based on external web search results.")
 
+REPEAT_PROMPT = """You will be given a single question and two or more corresponding answers. Determine whether the the answers are essentially the same in meaning.
+If they are, output TRUE. If they are not, output FALSE.
+Do not output any additional explanation or text."""
+
 class EvaluatorTestEnv:
     def __init__(
         self, 
@@ -32,7 +36,9 @@ class EvaluatorTestEnv:
         self.start_time = time.time()
         self.env_cost = 0.0
         self.interview_path = interview_path
-        data = read_json(interview_path)
+        all_data = read_json(interview_path)
+        data = list(all_data.values())[0]  # first interview session per file
+        self.num_sessions = len(all_data.keys())
         self.evaluator_history = data["agent_memory"]["evaluator"]
         self.history = data['history']
         
@@ -48,6 +54,15 @@ class EvaluatorTestEnv:
         self.internal_conflict_verdicts = []
         self.external_conflict_verdicts = []
         self.first_conflict_turn = None
+        self.all_verdicts = []
+        
+        self.inter_session_data = {}
+        for session_id, d in all_data.items():
+            get_to_knows = [turn["environment_observation"][0]['response'] for turn in d['history'] if turn['type'] == "get_to_know"]
+            self.inter_session_data[session_id] = get_to_knows
+        # gather each question-response pair across sessions
+        self.inter_session_results = []
+        self.inter_session_score = None
         
     def reset(self):
         """reset the environment"""
@@ -69,6 +84,10 @@ class EvaluatorTestEnv:
         return turn_idx
 
     def score_conflict(self, idx, verdict_action: Action):
+        self.all_verdicts.append({
+            "message_idx": idx,
+            "verdicts": {'value': verdict_action.content['verdict']}
+        })
         if verdict_action.content['verdict'] == 'conflict': # verdict_action.content['ground'] == 'internal':
             turn_idx = self._find_turn_idx(idx)
             question = self.history[turn_idx]['environment_observation'][0]['response']['question']
@@ -122,7 +141,7 @@ class EvaluatorTestEnv:
         messages_list = [
             self.evaluator_history[:i+1] for i in self.user_indices
         ]
-        logging.info(f"[EVALUATOR] Evaluating {len(messages_list)} user responses for internal consistency.")
+        logging.info(f"[EVALUATOR] Evaluating {len(messages_list)} user responses for consistency.")
         with ThreadPoolExecutor(max_workers=16) as executor:
             verdicts = list(tqdm(executor.map(
                 lambda messages: self.generate_verdict(messages),
@@ -138,13 +157,57 @@ class EvaluatorTestEnv:
                 logging.info(f"[EVALUATOR] Raw response: {verdict.choices[0].message.content}")
                 
             content = response.model_dump()
-            logging.info(f"[EVALUATOR] Verdict: {content['verdict']}, Ground: {content['ground']}, Rationale: {content['rationale']}")
+            # logging.info(f"[EVALUATOR] Verdict: {content['verdict']}, Ground: {content['ground']}, Rationale: {content['rationale']}")
             verdict_action = Action(
                 agent="evaluator",
                 action_type="respond",
                 content=content
             )
             self.score_conflict(idx, verdict_action)
+        # breakpoint()
+        # inter-session consistency
+        # for each element pair/triplet/whatsoever in all_data.values() with same index across sessions, 
+        # i.e. get_to_knows[0] in session 1, get_to_knows[0] in session 2, get_to_knows[0] in session 3, ...
+        if self.num_sessions > 1:
+            inter_session_messages_list = []
+            num_get_to_knows = min([len(v) for v in self.inter_session_data.values()])
+            for i in range(num_get_to_knows):
+                # question, responses
+                content = f"Question: {self.inter_session_data[list(self.inter_session_data.keys())[0]][i]['question']}" + "\n"
+                for session_id, get_to_knows in self.inter_session_data.items():
+                    content += f"Session `{session_id}` Response: {get_to_knows[i]['content']}\n"
+                inter_session_messages_list.append([
+                    {
+                        "role": "system",
+                        "content": REPEAT_PROMPT
+                    },
+                    {
+                        "role": "user",
+                        "content": content
+                    }
+                ])
+            # breakpoint()
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                inter_session_verdicts = list(tqdm(executor.map(
+                    lambda messages: get_completion(
+                        model=self.model,
+                        messages=messages,
+                    ),
+                    inter_session_messages_list
+                )))
+            inter_session_scores = []
+            for i, verdict in enumerate(inter_session_verdicts):
+                self.env_cost += completion_cost(verdict)
+                judge = verdict.choices[0].message.content.strip() if verdict and verdict.choices and verdict.choices[0].message and verdict.choices[0].message.content else None
+                inter_session_scores.append(judge == "TRUE")
+                self.inter_session_results.append({
+                    "question": self.inter_session_data[list(self.inter_session_data.keys())[0]][i]['question'],
+                    "responses": {session_id: self.inter_session_data[session_id][i]['content'] for session_id in self.inter_session_data.keys()},
+                    "is_consistent": judge,
+                })
+
+            self.inter_session_score = round(sum(inter_session_scores) / len(inter_session_scores), 4) if len(inter_session_scores) > 0 else None
+        
         return True
     
     
@@ -172,6 +235,10 @@ class EvaluatorTestEnv:
             "repeat_score":{
                 "repeat_score": self.repeat_score,
                 "repeat_results": self.repeat_results
+            },
+            "inter_session_score": {
+                "inter_session_score": self.inter_session_score,
+                "inter_session_results": self.inter_session_results
             }
         }
             
@@ -179,7 +246,12 @@ class EvaluatorTestEnv:
         
         logging.info(f"Saving final result to {path}")
         logging.info(f"Total cost: ${final_result['total_cost']}, Duration: {final_result['duration']}")
-        
+        logging.info("Results summary:")
+        logging.info(f"External Consistency Rate: {final_result['external_consistency']['consistency_rate']}")
+        logging.info(f"Internal Consistency Rate: {final_result['internal_consistency']['consistency_rate']}")
+        logging.info(f"Inter-Session Consistency Rate: {final_result['inter_session_score']['inter_session_score']}")
+        logging.info(f"Repeat Score: {final_result['repeat_score']['repeat_score']}")
+        return 
 
 if __name__ == "__main__":
     from src.utils import setup_logging
@@ -187,9 +259,10 @@ if __name__ == "__main__":
     setup_logging(log_to_file=True, process_name="test_env")
     load_dotenv()
 
-    parser = ArgumentParser(description="Questioner Test Environment")
+    parser = ArgumentParser(description="Evaluator Test Environment")
     parser.add_argument("--model", type=str, default="gpt-5", help="Model to use")
     parser.add_argument("--interview_path", type=str, required=True, help="Path to interview data JSON file")
+    parser.add_argument("--baseline_name", type=str, required=True, help="Baseline name for saving results")
     args = parser.parse_args()
 
     env = EvaluatorTestEnv(
@@ -198,4 +271,4 @@ if __name__ == "__main__":
     )
     state = env.reset()
     env.step()
-    env.save_state(f"data/prompt_engineering/conflict_detection/evaluation_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    env.save_state(f"data/evaluation/{args.baseline_name}/evaluation_{os.path.basename(args.interview_path)}")

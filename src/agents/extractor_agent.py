@@ -23,7 +23,7 @@ class ExtractorAgent(Agent):
     def act(self, message: str) -> Action:
         class ExtractorResponse(BaseModel):
             entity: str | None = None
-            claim: str | None = None
+            claims: List[str] | None = None
             rationale: str | None = None # rationale for the claim (optional)
         
         class EntityClaim(BaseModel):

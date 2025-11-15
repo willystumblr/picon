@@ -14,7 +14,7 @@ class WebSearchAgent(Agent):
             model=kwargs.get('model', "gemini/gemini-2.5-flash")
         )
         self.tools = kwargs.get('tools', [])
-        self.cutoff_date = time.strftime("%Y-%m-%d") # default to current date
+        self.cutoff_date = time.strftime("%B %d, %Y") # default to current date
     
     def set_cutoff_date(self, cutoff_date: str) -> None:
         self.cutoff_date = cutoff_date
@@ -27,12 +27,12 @@ class WebSearchAgent(Agent):
             )
         # for entity_claim in message:
         entity = message.get('entity', 'no entity')
-        claim = message.get('claim', 'no claim')
+        claims = message.get('claims', ['no claim'])
         rationale = message.get('rationale', '')
-        if entity != 'no entity':
-            prompt_format = f"Does the following claim-entity pair need to be verified with web-search?\nClaim: {claim}\nEntity: {entity}\nRationale: {rationale}\nCutoff Date: {self.cutoff_date}"
-        else:
-            prompt_format = f"Does the following claim need to be verified with web-search?\nClaim: {claim}\nCutoff Date: {self.cutoff_date}"
+        if entity and entity != 'no entity':
+            prompt_format = f"Does the following entity-claims pair need to be verified with web-search?\nEntity: {entity}\nClaims: {claims}\n\nRationale: {rationale}\nCutoff Date: {self.cutoff_date}"
+        elif entity == 'no entity':
+            prompt_format = f"Does the following claim need to be verified with web-search?\nClaim: {claims}\nCutoff Date: {self.cutoff_date}"
         while True:
             prompt = f"Conversation History:\n\n"
             for qa in history:
@@ -46,12 +46,12 @@ class WebSearchAgent(Agent):
                 reasoning_effort="low",
             )
             self._calculate_cost(res)
-            res_ = res.choices[0].message.content.lower()
-            if res_ in ['yes', 'no']:
+            proceed_to_web_search = res.choices[0].message.content.lower()
+            if proceed_to_web_search in ['yes', 'no']:
                 break
 
-        if res_ == 'yes':
-            prompt = f"Given the entity: {entity}, and the claim: {claim}, with rationale: {rationale}, decide the best tool to use to verify the claim." if 'entity' in locals() else f"Given the claim: {claim}, with rationale: {rationale}, decide the best tool to use to verify the claim."
+        if proceed_to_web_search == 'yes': # , and the claim: {claim}, with rationale: {rationale}
+            prompt = f"Search {entity} with a proper tool." if entity and entity!="no entity" else f"Search the claim: {claims} with a proper tool."
             res = get_completion(
                 model=self.model,
                 messages=self.memory + [{"role": "user", "content": prompt}], # no memory needed
@@ -75,5 +75,5 @@ class WebSearchAgent(Agent):
                     )
                 )
         else:
-            logging.warning(f"WebSearchAgent decided no web search needed for entity: {entity}, claim: {claim}.")
+            logging.warning(f"WebSearchAgent decided no web search needed for entity: {entity}, claims: {claims}.")
             return None

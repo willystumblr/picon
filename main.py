@@ -1,6 +1,7 @@
 import os
 from src.utils import setup_logging, read_json, write_json, get_user_input_with_timeout
 from src.env.interrogation_env import InterrogationEnv
+from src.env.evaluator_test_env import EvaluatorTestEnv
 from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
@@ -13,7 +14,6 @@ import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
     parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'human_interview'])
@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument('--max_workers', type=int, default=5, help='Maximum number of workers for the interrogation.')
     parser.add_argument('--sample', action='store_true', help='Whether to sample OpenCharacter personas.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for sampling personas.')
+    parser.add_argument('--question_seed', type=int, default=42, help='Random seed for pre-defined questions\' order.')
     parser.add_argument('--log_to_file', action='store_true', help='Whether to log to a file.')
     parser.add_argument('--questioner_prompt_path', type=str, default='src/agents/prompts/questioner.txt', help='Path to the questioner agent prompt file.')
     parser.add_argument('--entity_extractor_prompt_path', type=str, default='src/agents/prompts/entity_extractor.txt', help='Path to the entity extractor agent prompt file.')
@@ -33,12 +34,33 @@ def parse_args():
     parser.add_argument('--use_claim_extractor', action='store_true', help='Whether to use the claim extractor agent instead of the entity extractor agent.')
     parser.add_argument('--output_dir', type=str, default='data/results', help='Directory to save the results.')
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
+    parser.add_argument('--num_sessions', type=int, default=2, help='Number of interrogation sessions to run per interviewee.')
     
     return parser.parse_args()
 
-def main(interviewee_kwarg):
+def run_session(args, env: InterrogationEnv, reset_only=False):
     try:
-        logging.info(f"Starting new session with interviewee: {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}")
+        logging.info(f"Starting new session with interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
+        env.reset()
+        if not reset_only:
+            done = False
+            while not done:
+                state, done = env.step()
+            env.finalize()
+        result = env.save_state()
+        return result, "Successfully completed"
+    except Exception as e:
+        logging.exception(f"Error during session with interviewee {env.interviewee.name}, baseline: {env.interviewee.type}: {e}")
+        logging.info("Saving partial state...")
+        termination_status=f"Error: {str(e)}"
+        result = env.save_state(termination_status=termination_status)
+        return result, termination_status
+
+def main(args, interviewee_kwarg):
+    results_complete = {}
+    result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+    
+    for session_idx in range(args.num_sessions):
         tools = {
             "google_claim_search": GoogleClaimSearch(
                 api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
@@ -58,18 +80,44 @@ def main(interviewee_kwarg):
             max_turns=args.num_turns,
             **interviewee_kwarg
         )
-        state = env.reset()
-        done = False
-        while not done:
-            state, done = env.step()
-        state = env.finalize()
-        result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-        env.save_state(result_path)
-    except Exception as e:
-        logging.exception(f"Error during session with interviewee {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}: {e}")
-        logging.info("Saving partial state...")
-        env.save_state(f"{args.temp_output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_error_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json", termination_status=f"Error: {str(e)}")
-        return
+        logging.info(f"Starting session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
+        reset_only = False
+        if session_idx > 0:
+            # reset only to start a new session
+            logging.info("Resetting environment for new session...")
+            reset_only = True
+        session_result, status = run_session(args, env, reset_only=reset_only)
+        results_complete[f"session_{session_idx + 1}"] = session_result
+    write_json(results_complete, result_path)
+    logging.info("Starting evaluation with EvaluatorTestEnv...")
+    evaluator_env = EvaluatorTestEnv(
+        model=args.model,
+        interview_path=results_complete
+    )
+    evaluator_env.reset()
+    evaluator_env.step()
+
+    results_complete["fist_conflict_turn"] = evaluator_env.first_conflict_turn
+    results_complete["external_consistency"] = {
+        "total_evaluations": evaluator_env.external_count,
+        "conflict_count": evaluator_env.external_conflict,
+        "plausible_count": evaluator_env.external_plausible,
+        "consistency_rate": (evaluator_env.external_plausible / evaluator_env.external_count) if evaluator_env.external_count > 0 else None,
+        "conflict_verdicts": evaluator_env.external_conflict_verdicts
+    }
+    results_complete["internal_consistency"] = {
+        "total_evaluations": evaluator_env.internal_count,
+        "conflict_count": evaluator_env.internal_conflict,
+        "plausible_count": evaluator_env.internal_plausible,
+        "consistency_rate": (evaluator_env.internal_plausible / evaluator_env.internal_count) if evaluator_env.internal_count > 0 else None,
+        "conflict_verdicts": evaluator_env.internal_conflict_verdicts
+    }
+    results_complete["inter_session_score"] = {
+        "inter_session_score": evaluator_env.inter_session_score,
+        "inter_session_results": evaluator_env.inter_session_results
+    }
+    write_json(results_complete, result_path)
+    logging.info(f"Saved results to {result_path}.")
 
 if __name__ == "__main__":
     args = parse_args()
@@ -87,14 +135,16 @@ if __name__ == "__main__":
                 "character_id": persona['character_id'],
                 "user_id": os.getenv('CAI_API_KEY'), #args.user_id,
                 "name": persona['character_name'],
-                "nhd_model": args.nhd_model
+                "nhd_model": args.nhd_model,
+                "question_seed": args.question_seed
             })    
     elif args.baseline_name == "human_simulacra":
         interviewee_kwargs = [{
             "baseline_name": "human_simulacra",
             "name": name,            
             "nhd_model": args.nhd_model,
-            "hs_model": args.hs_model
+            "hs_model": args.hs_model,
+            "question_seed": args.question_seed
         } for name in ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami Clark", "Michael Miller", "Kevin Kelly", "Erica Walker", "Leslie Nichols", "Robert Scott", "Marsh Zhaleh"]]
     elif args.baseline_name == "opencharacter":
         dataset = load_dataset("xywang1/OpenCharacter", "Synthetic-Character", split="train")
@@ -112,13 +162,15 @@ if __name__ == "__main__":
                 "profile": data['character'],
                 "name": name_match.group(1).strip(),
                 "load_in_4bit": True,
-                "nhd_model": args.nhd_model                
+                "nhd_model": args.nhd_model,
+                "question_seed": args.question_seed
             })
     elif args.baseline_name == "human_interview":
         interviewee_kwargs = [{
             "baseline_name": "human_interview",
             "name": input("Enter your name: "),
-            "nhd_model": args.nhd_model
+            "nhd_model": args.nhd_model,
+            "question_seed": args.question_seed
         }]
     else:
         raise ValueError("Invalid baseline name. Choose from ['characterai', 'human_simulacra', 'opencharacter', 'human_interview']")
@@ -141,7 +193,7 @@ if __name__ == "__main__":
     
     executor_type = ProcessPoolExecutor if args.baseline_name == "opencharacter" else ThreadPoolExecutor
     with executor_type(max_workers=args.max_workers) as executor:
-        futures = {executor.submit(main, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
+        futures = {executor.submit(main, args, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
         for future in as_completed(futures):
             interviewee_kwarg = futures[future]
             try:

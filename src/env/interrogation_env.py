@@ -13,6 +13,8 @@ from litellm.cost_calculator import completion_cost
 import os
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
+import random
+import asyncio
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
@@ -34,6 +36,11 @@ class InterrogationEnv:
         instruction_path: str = "src/env/interrogation_instruct.txt",
         **kwargs
         ):
+        
+        # random seed for reproducibility
+        seed = kwargs.get('question_seed', 42)
+        random.seed(seed)
+        
         self.tools = tools
         self.model = model
         if not agents:
@@ -55,14 +62,19 @@ class InterrogationEnv:
             baseline_name=baseline_name,
             **kwargs # simulator specific args (character_id, user_id, name for characterai; model_path, persona, profile for opencharacter; name for human_simulacra)
         )
-        self.max_turns = max_turns + 1
-        self.predefined_questions = read_json(question_path)
+        self.max_turns = max_turns
+        questions = read_json(question_path)
+        random.shuffle(questions)
+        self.predefined_questions = questions
         self.instruction = open(instruction_path).read()
         self.state = State(current_turn=0, history=[])
         self.cutoff_date = time.strftime("%B %d, %Y")
-        self.start_time = time.time()
+        self.start_time = None
         self.env_cost = 0.0
 
+        self.agents['questioner'].set_cutoff_date(self.cutoff_date)
+        self.agents['web_search'].set_cutoff_date(self.cutoff_date)
+        self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
         
         # repeat
         self.repeat_score = 0
@@ -91,9 +103,7 @@ class InterrogationEnv:
 
     def reset(self):
         """run predefined questions to initialize the interview state"""
-        self.agents['questioner'].set_cutoff_date(self.cutoff_date)
-        self.agents['web_search'].set_cutoff_date(self.cutoff_date)
-        self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
+        self.start_time = time.time()
         self.instruction = self.instruction.format(cutoff_date=self.cutoff_date)
         # feed interview instruction to the interviewee
         logging.info(f"[INSTRUCTION] {self.instruction}")
@@ -161,8 +171,13 @@ class InterrogationEnv:
             # 2. Web Search (optional)
             with ThreadPoolExecutor(max_workers=len(list_of_extractions)) as executor:
                 web_search_actions = list(executor.map(self.agents['web_search'].act, list_of_extractions, [history]*len(list_of_extractions)))
-            filtered_actions = [action for action in web_search_actions if action and action.action_type == "tool_call"]
-            
+            filtered_actions = []
+            filtered_actions_indices = []
+            for i, action in enumerate(web_search_actions): 
+                if action and action.action_type == "tool_call":
+                    filtered_actions.append(action)
+                    filtered_actions_indices.append(i)
+
             if filtered_actions:
                 with ThreadPoolExecutor(max_workers=len(filtered_actions)) as executor:
                     tool_outputs = list(executor.map(self.invoke_tool, filtered_actions))
@@ -171,24 +186,34 @@ class InterrogationEnv:
                     observation_type="tool_output",
                     tool_output=tool_outputs
                 ))
-
+                
                 for i, output in enumerate(tool_outputs):
                     sub_message = [
+                        {
+                            "role": "user",
+                            "content": message
+                        },
                         filtered_actions[i].tool_call.details,
                         {
                             "role": "tool",
                             "tool_call_id": output.tool_call_id,
                             "name": output.tool_name,
-                            "content": str(output.output)
+                            "content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nClaims: {list_of_extractions[filtered_actions_indices[i]]['claims']}\nRationale: {list_of_extractions[filtered_actions_indices[i]]['rationale']}\nSearch Result:{str(output.output)}"
                         }
                     ]
+                    
                     """tool call 결과를 evaluator 메모리에 추가"""
-                    self.agents['evaluator'].update_memory(**sub_message[0]) ####### 여기 #######
                     self.agents['evaluator'].update_memory(**sub_message[1]) ####### 여기 #######
+                    self.agents['evaluator'].update_memory(**sub_message[2]) ####### 여기 #######
                     messages = [
                         {
                             "role": "system",
-                            "content": "Ask a single question to the interviewee to confirm or refute the information found in the web search results.\""
+                            "content": (
+                                "Ask a short, concise \"confirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
+                                "Assume that no further search is available beyond the provided search results. "
+                                "If search results are incomplete due to search failure or error, ask a generic confirmation question about the entity. "
+                                "Generate a single question without any additional explanation. "
+                            )
                         },
                     ]
                     messages.extend(sub_message)
@@ -208,7 +233,8 @@ class InterrogationEnv:
                     ))
                     self.agents['evaluator'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
                     self.agents['evaluator'].update_memory(role="user", content=response.content) ####### 여기 #######
-                    
+                    self.agents['questioner'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
+                    self.agents['questioner'].update_memory(role="user", content=response.content) ####### 여기 #######
                     
             else:
                 filtered_actions = []
@@ -254,9 +280,6 @@ class InterrogationEnv:
             logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
             response = self.interviewee.get_response(f"Just to clarify, {q['question']}")
             logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
-            if i == 0:
-                # first turn defines the cutoff date
-                continue
             # update state
             action = Action(action_type="respond", content=q['question'])
             observation = Observation(
@@ -277,7 +300,7 @@ class InterrogationEnv:
                     reasoning_effort="low",
                 )
                 self.env_cost += completion_cost(res)
-                judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else "FALSE"
+                judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
                 if judge in ["TRUE", "FALSE"]:
                     break
                 logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
@@ -290,12 +313,14 @@ class InterrogationEnv:
             })
             self.repeat_score += (judge=='TRUE')
         self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
-        if self.interviewee.baseline_name == "characterai":
-            self.interviewee.close()
+        if self.interviewee.type == "characterai":
+            asyncio.run(self.interviewee.close())
+        elif self.interviewee.type == "opencharacter":
+            self.interviewee.clear_model()
         return self.state
         
     
-    def save_state(self, path: str, termination_status: str = "Successfully completed"):
+    def save_state(self, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         agent_cost = sum(agent.cost for agent in self.agents.values())
         interviewee_cost = self.interviewee.calculate_cost()
@@ -303,6 +328,7 @@ class InterrogationEnv:
         total_cost = agent_cost + interviewee_cost + self.env_cost + tool_costs
 
         final_result={
+            "interview_date": self.cutoff_date,
             "agents_info":{agent_name: agent.model for agent_name, agent in self.agents.items()},
             "interviewee_info": {
                 "name": self.interviewee.name,
@@ -326,15 +352,14 @@ class InterrogationEnv:
                 "repeat_results": self.repeat_results
             }
         }
-        write_json(final_result, path)
-        
-        logging.info(f"Saving final result to {path}")
+        # write_json(final_result, path)
         
         logging.info("Cost: (agent):" + ", ".join([f"{agent_name}: ${agent.cost}" for agent_name, agent in self.agents.items()]))
         logging.info(f"Cost: (interviewee): ${interviewee_cost}")
         logging.info(f"Cost: (environment): ${self.env_cost}")
         logging.info(f"Total cost: ${final_result['cost']['total_cost']}, Duration: {final_result['duration']}")
         logging.info(f"Repeat score: {final_result['repeat']['repeat_score']}")
+        return final_result
 
 if __name__ == "__main__":
     from src.utils import setup_logging

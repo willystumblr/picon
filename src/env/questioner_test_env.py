@@ -98,7 +98,7 @@ class QuestionerTestEnv:
         logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
         # run predefined questions
         for i, q in enumerate(self.predefined_questions):
-            logging.info(f"[QUESTION] {q['question']}")
+            logging.info(f"[QUESTION {self.state.current_turn}] {q['question']}")
             response = self.interviewee.get_response(q['question'])
             logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
             if i == 0:
@@ -226,6 +226,7 @@ class QuestionerTestEnv:
     
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation"""
+        logging.info(f"--- Turn {self.state.current_turn} ---")
         if self.state.current_turn >= self.max_turns:
             logging.warning("Max turns reached. Please reset the environment.")
             return self.state, True
@@ -330,7 +331,7 @@ Do not output any additional explanation or text."""
                 "is_repeat": judge
             })
             self.repeat_score += (judge=='TRUE')
-        self.repeat_score = round(self.repeat_score / len(self.predefined_questions-1), 4)
+        self.repeat_score = round(self.repeat_score / (len(self.predefined_questions)-1), 4)
         return self.state
 
 if __name__ == "__main__":

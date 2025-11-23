@@ -39,7 +39,7 @@ class InterrogationEnv:
         
         # random seed for reproducibility
         seed = kwargs.get('question_seed', 42)
-        random.seed(seed)
+        local_rng = random.Random(seed)
         
         self.tools = tools
         self.model = model
@@ -64,7 +64,7 @@ class InterrogationEnv:
         )
         self.max_turns = max_turns
         questions = read_json(question_path)
-        random.shuffle(questions)
+        local_rng.shuffle(questions)
         self.predefined_questions = questions
         self.instruction = open(instruction_path).read()
         self.state = State(current_turn=0, history=[])
@@ -318,7 +318,7 @@ class InterrogationEnv:
         self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
         if self.interviewee.type == "characterai":
             asyncio.run(self.interviewee.close())
-        elif self.interviewee.type == "opencharacter":
+        elif self.interviewee.type == "opencharacter" or self.interviewee.type == "consistent_llm":
             self.interviewee.clear_model()
         return self.state
         

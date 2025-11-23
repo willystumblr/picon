@@ -18,7 +18,18 @@ def write_json(data: Any, file_path: str) -> None:
         os.makedirs(os.path.dirname(file_path))
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
-
+def read_jsonl(file_path: str) -> List[Any]:
+    data = []
+    with open(file_path, "r") as f:
+        for line in f:
+            data.append(json.loads(line))
+    return data
+def write_jsonl(data: List[Any], file_path: str) -> None:
+    if os.path.dirname(file_path) and not os.path.exists(os.path.dirname(file_path)):
+        os.makedirs(os.path.dirname(file_path))
+    with open(file_path, "w") as f:
+        for item in data:
+            f.write(json.dumps(item) + "\n")
 def get_completion(model: str, messages: list, temperature: float = 1.0, max_retries=3, **kwargs):
     for attempt in range(1, max_retries+1):
         try:

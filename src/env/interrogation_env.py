@@ -211,7 +211,7 @@ class InterrogationEnv:
                             "content": (
                                 "Ask a short, concise \"affirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
                                 "Assume that no further search is available beyond the provided search results. "
-                                "If the tool `google_claim_search`'s search results are lacks all components ('title', 'link', and 'text_block') due to search failure or error, respond with a single word 'SKIP' to indicate that no confirmation question can be generated (without explanation). "
+                                "If the tool `google_claim_search`'s search results are lacks all components ('title', 'link', and 'text_block') due to search failure or error, respond with a single word 'SKIP' (only one time) to indicate that no confirmation question can be generated (without explanation). "
                                 "If search results are available but 'text_block is incomplete or insufficient to form a meaningful question, use only the available information (either 'title' or 'link') to form your question. "
                                 "Generate either 'SKIP' or a single question without any additional explanation. "
                             )
@@ -225,7 +225,7 @@ class InterrogationEnv:
                     )
                     self.env_cost += completion_cost(res)
                     confirmation_question = res.choices[0].message.content.strip()
-                    if confirmation_question != "SKIP":
+                    if "SKIP" not in confirmation_question:
                         logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
                         response = self.interviewee.get_response(confirmation_question)
                         logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")

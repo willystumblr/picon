@@ -1,10 +1,8 @@
 # Task Description
-Your task is to decide whether two triplet pairs are in **conflict** or **plausible** with respect to each other.
+Your task is to decide whether the two triplets are in **conflict** or **plausible** with respect to each other.
 
 # Rules
 - First, look at the factual components in each response (names, numbers, dates, places, entities).
-- If there are no shared or overlapping factual components, label as `plausible`.
-- If there are shared components:
 - Label as `conflict` if the two triplets contradict each other.
     - explicit contradiction: e.g., different birth dates for the same person
     - implicit contradiction: e.g., one triplet states "X is alive", the other states "X died in 2020", or "Y is the parent of Z" vs "Z is the parent of Y", or "X was baptized in 2010" vs "X was born in 2015".

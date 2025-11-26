@@ -1,224 +1,369 @@
 import os
 import json
+from typing import List, Dict, Any
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-#################################
-# 1. 데이터 로더 (폴더 하나)
-#################################
 
-def load_metrics_from_dir(dir_path: str, source_label: str) -> pd.DataFrame:
+# ==============================
+# Data loading
+# ==============================
+
+def read_json_safe(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[WARN] Failed to read {path}: {e}")
+        return {}
+
+
+def load_metrics_for_baseline(base_dir: str, baseline: str) -> pd.DataFrame:
     """
-    dir_path 안의 모든 .json 파일에서 metric들을 수집해서
-    DataFrame으로 반환. 이 때 'source' 컬럼에 source_label을 붙인다.
+    Load required metrics from JSON files under {base_dir}/{baseline}.
+    Returns a DataFrame with one row per file.
+    Columns:
+      - baseline
+      - file
+      - external_total_evaluations
+      - external_consistency_rate
+      - internal_consistency_rate
+      - inter_session_score
     """
+    dir_path = os.path.join(base_dir, baseline)
     rows = []
 
     if not os.path.isdir(dir_path):
-        # 폴더 없으면 빈 df
-        return pd.DataFrame(columns=[
-            "file",
-            "external_consistency_rate",
-            "internal_consistency_rate",
-            "repeat_score",
-            "source"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "baseline",
+                "file",
+                "external_total_evaluations",
+                "external_consistency_rate",
+                "internal_consistency_rate",
+                "inter_session_score",
+            ]
+        )
 
-    for fname in os.listdir(dir_path):
+    for fname in sorted(os.listdir(dir_path)):
         if not fname.endswith(".json"):
             continue
-
         fpath = os.path.join(dir_path, fname)
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"[WARN] {fname} load error: {e}")
-            continue
+        data = read_json_safe(fpath)
 
-        ext = data.get("external_consistency", {})
-        intl = data.get("internal_consistency", {})
-        rpt = data.get("repeat", {})
+        ext = data.get("external_consistency", {}) or {}
+        intl = data.get("internal_consistency", {}) or {}
+        inter = data.get("inter_session_score", {}) or {}
 
-        rows.append({
-            "file": fname,
-            "external_consistency_rate": ext.get("consistency_rate", None),
-            "internal_consistency_rate": intl.get("consistency_rate", None),
-            "repeat_score": rpt.get("repeat_score", None),
-            "source": source_label.split('/')[-1],  # 폴더명만 쓰기
-        })
+        rows.append(
+            {
+                "baseline": baseline,
+                "file": fname,
+                "external_total_evaluations": ext.get("total_evaluations"),
+                "external_consistency_rate": ext.get("consistency_rate"),
+                "internal_consistency_rate": intl.get("consistency_rate"),
+                "inter_session_score": inter.get("inter_session_score"),
+            }
+        )
 
     return pd.DataFrame(rows)
 
 
-#################################
-# 2. 여러 폴더 한 번에 로드
-#################################
-
-def load_from_multiple_dirs(dir_list_raw: str) -> pd.DataFrame:
-    """
-    "cai, cai_v2, experiment/run3" 처럼 콤마로 구분된 입력 문자열을 받아서
-    각 폴더에서 df를 로드하고 concat.
-    """
-    # 공백 제거 + 빈 문자열 제거
-    dirs = [d.strip() for d in dir_list_raw.split(",") if d.strip()]
-
-    dfs = []
-    for d in dirs:
-        df_d = load_metrics_from_dir(d, source_label=d)
-        dfs.append(df_d)
-
-    if not dfs:
-        return pd.DataFrame(columns=[
-            "file",
-            "external_consistency_rate",
-            "internal_consistency_rate",
-            "repeat_score",
-            "source"
-        ])
-
-    return pd.concat(dfs, ignore_index=True)
+def load_all_baselines(base_dir: str, baselines: List[str]) -> pd.DataFrame:
+    parts = [load_metrics_for_baseline(base_dir, b) for b in baselines]
+    parts = [p for p in parts if not p.empty]
+    if not parts:
+        return pd.DataFrame(
+            columns=[
+                "baseline",
+                "file",
+                "external_total_evaluations",
+                "external_consistency_rate",
+                "internal_consistency_rate",
+                "inter_session_score",
+            ]
+        )
+    return pd.concat(parts, ignore_index=True)
 
 
-#################################
-# 3. Plot helper들
-#################################
+# ==============================
+# Plot helpers
+# ==============================
 
-def boxplot_metric_multi(df: pd.DataFrame, value_col: str, title: str):
-    """
-    여러 폴더(source)에서 같은 metric(value_col)을 비교하는 box plot.
-    x축: source (폴더명), y축: metric 값
-    그리고 각 source별 mean 값을 box 위에 다이아몬드 마커+텍스트로 overlay.
-    """
-    plot_df = df[["source", value_col]].dropna()
-
+def box_with_mean(df: pd.DataFrame, x_col: str, y_col: str, title: str):
+    plot_df = df[[x_col, y_col]].dropna()
     if plot_df.empty:
-        st.info(f"{value_col} 에 유효한 값이 없습니다.")
+        st.info(f"No valid data for {y_col}.")
         return
 
-    # 1) 기본 box plot
-    fig = px.box(
-        plot_df,
-        x="source",
-        y=value_col,
-        points="all",
-        title=title
-    )
-
-    # 2) source별 평균 계산
-    mean_df = plot_df.groupby("source", as_index=False)[value_col].mean()
-
-    # 3) 평균 overlay
+    fig = px.box(plot_df, x=x_col, y=y_col, points="all", title=title)
+    mean_df = plot_df.groupby(x_col, as_index=False)[y_col].mean()
     fig.add_trace(
         go.Scatter(
-            x=mean_df["source"],
-            y=mean_df[value_col],
+            x=mean_df[x_col],
+            y=mean_df[y_col],
             mode="markers+text",
             marker_symbol="diamond",
-            marker_size=9,
+            marker_size=10,
             marker_color="black",
-            text=mean_df[value_col].round(4).astype(str),
+            text=mean_df[y_col].round(4).astype(str),
             textposition="top center",
-            textfont=dict(
-                size=14,         # ← 글씨 크게
-                color="black",   # ← 글씨 색 진하게
-                family="Arial"   # (선택) 좀 읽기 쉬운 폰트
-            ),
-            name="mean"
+            name="mean",
         )
     )
-
     st.plotly_chart(fig, use_container_width=True)
 
 
+def bar_sum_by_group(df: pd.DataFrame, group_col: str, value_col: str, title: str, y_title: str):
+    plot_df = df[[group_col, value_col]].dropna()
+    if plot_df.empty:
+        st.info(f"No valid data for {value_col}.")
+        return
 
-#################################
-# 4. Streamlit UI
-#################################
+    agg = plot_df.groupby(group_col, as_index=False)[value_col].sum()
+    fig = px.bar(agg, x=group_col, y=value_col, text=value_col, title=title)
+    fig.update_traces(textposition="outside")
+    fig.update_layout(yaxis_title=y_title)
+    st.plotly_chart(fig, use_container_width=True)
 
-st.set_page_config(
-    page_title="Consistency Metrics Dashboard (Multi-Experiment)",
-    layout="wide"
-)
 
-st.title("Consistency Metrics Dashboard (Multi-Experiment)")
-st.markdown(
-    """
-    여러 실험 결과 폴더를 한 번에 비교할 수 있는 대시보드입니다.  
-    예시 입력:  
-    `cai, cai_v2, /home/james/results/cai_ablation`  
-    콤마(,)로 나누고 엔터(↩) 치면 로드됩니다.
-    """
-)
+# ==============================
+# Streamlit App
+# ==============================
 
-# 🔴 폴더 경로 입력 + 엔터로 submit 되도록 form 사용
-with st.form(key="dir_form"):
-    dir_list_raw = st.text_input(
-        "데이터 폴더 경로(콤마로 여러 개 입력)",
-        value="cai"
+st.set_page_config(page_title="Consistency Metrics (2025-11-16)", layout="wide")
+st.title("Consistency Metrics Dashboard — 2025-11-16")
+
+with st.form("controls"):
+    base_dir = st.text_input("Base directory", value="data/2025_11_16")
+    default_baselines = ["characterai", "human_simulacra", "opencharacter"]
+    baselines = st.multiselect(
+        "Baselines (child directories)",
+        options=default_baselines,
+        default=default_baselines,
     )
-    submitted = st.form_submit_button("로드")  # Enter 쳐도 submit
+    submitted = st.form_submit_button("Load")
 
 if not submitted:
-    # 아직 submit 안 했을 때는 이후 내용 그리지 않음
     st.stop()
 
-# 사용자가 엔터 or 버튼으로 제출하면 그 순간부터 아래 실행:
+df = load_all_baselines(base_dir, baselines)
 
-# 데이터 로드
-df_all = load_from_multiple_dirs(dir_list_raw)
-
-if df_all.empty:
-    st.error("유효한 데이터가 없습니다. 폴더 경로를 확인해주세요.")
+if df.empty:
+    st.warning("No metrics found. Verify base directory and baselines.")
     st.stop()
 
-st.subheader("Raw extracted metrics (통합)")
-st.dataframe(df_all)
+st.subheader("Per-file Metrics")
+st.dataframe(
+    df.sort_values(["baseline", "file"]).reset_index(drop=True),
+    use_container_width=True,
+)
 
-#################################
-# 5. 폴더별 box plot (metric별)
-#################################
+# Aggregated summary by baseline
+st.subheader("Summary by Baseline")
+summary = (
+    df.groupby("baseline", as_index=False)
+    .agg(
+        external_total_evaluations_sum=("external_total_evaluations", "sum"),
+        external_consistency_rate_mean=("external_consistency_rate", "mean"),
+        internal_consistency_rate_mean=("internal_consistency_rate", "mean"),
+        inter_session_score_mean=("inter_session_score", "mean"),
+        files=("file", "count"),
+    )
+)
+st.dataframe(summary, use_container_width=True)
 
-st.markdown("## Metric별 Box Plot (폴더 비교 + mean 표시)")
+st.markdown("---")
+st.header("Visualizations")
 
-col1, col2, col3 = st.columns(3)
-
+col1, col2 = st.columns(2)
 with col1:
-    st.markdown("### External Consistency Rate")
-    boxplot_metric_multi(
-        df_all,
-        value_col="external_consistency_rate",
-        title="external_consistency.consistency_rate by folder"
+    st.markdown("### External — total_evaluations (sum by baseline)")
+    bar_sum_by_group(
+        df,
+        group_col="baseline",
+        value_col="external_total_evaluations",
+        title="External total_evaluations — sum by baseline",
+        y_title="total_evaluations (sum)",
     )
 
 with col2:
-    st.markdown("### Internal Consistency Rate")
-    boxplot_metric_multi(
-        df_all,
-        value_col="internal_consistency_rate",
-        title="internal_consistency.consistency_rate by folder"
+    st.markdown("### External — consistency_rate (per-file distribution)")
+    box_with_mean(
+        df,
+        x_col="baseline",
+        y_col="external_consistency_rate",
+        title="External consistency_rate by baseline",
     )
 
+col3, col4 = st.columns(2)
 with col3:
-    st.markdown("### Repeat Score")
-    boxplot_metric_multi(
-        df_all,
-        value_col="repeat_score",
-        title="repeat.repeat_score by folder"
+    st.markdown("### Internal — consistency_rate (per-file distribution)")
+    box_with_mean(
+        df,
+        x_col="baseline",
+        y_col="internal_consistency_rate",
+        title="Internal consistency_rate by baseline",
     )
 
-#################################
-# 6. 추가: 모든 metric vs 모든 폴더 한 번에 보기
-#################################
-
+with col4:
+    st.markdown("### Inter-session — inter_session_score (per-file distribution)")
+    box_with_mean(
+        df,
+        x_col="baseline",
+        y_col="inter_session_score",
+        title="Inter-session score by baseline",
+    )
 
 st.markdown(
     """
-    - external_consistency_rate = external_consistency.consistency_rate  
-    - internal_consistency_rate = internal_consistency.consistency_rate  
-    - repeat_score = repeat.repeat_score  
-    - 검정색 다이아몬드 = 각 그룹의 평균  
+    - external_consistency.total_evaluations → summed per baseline (bar)
+    - external_consistency.consistency_rate → per-file distribution (box + mean)
+    - internal_consistency.consistency_rate → per-file distribution (box + mean)
+    - inter_session_score.inter_session_score → per-file distribution (box + mean)
     """
 )
+
+
+# ==============================
+# Abstain results (data/2025_11_16/abstain_results)
+# ==============================
+
+st.markdown("---")
+st.header("Abstain Results — 2025-11-16")
+
+def _is_abstain_true(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        lv = v.strip().lower()
+        return lv in {"true", "partially true", "partially_true", "partial", "yes"}
+    return False
+
+
+def load_abstain_for_baseline(abstain_base_dir: str, baseline: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Returns (per_file_df, per_file_type_counts_df)
+    per_file_df columns: baseline, file, total_count, abstain_true_count, abstain_rate
+    per_file_type_counts_df columns: baseline, file, abstain_type, count
+    """
+    dir_path = os.path.join(abstain_base_dir, baseline)
+    per_file_rows = []
+    type_rows = []
+
+    if not os.path.isdir(dir_path):
+        return (
+            pd.DataFrame(columns=["baseline", "file", "total_count", "abstain_true_count", "abstain_rate"]),
+            pd.DataFrame(columns=["baseline", "file", "abstain_type", "count"]),
+        )
+
+    for fname in sorted(os.listdir(dir_path)):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(dir_path, fname)
+        data = read_json_safe(fpath)
+
+        # Prefer explicit abstain_rate if present
+        explicit_rate = data.get("abstain_rate")
+        results = data.get("results", [])
+        total = len(results)
+
+        # Count abstain-true items (including partial true)
+        abstain_true_records = []
+        type_counter: Dict[str, int] = {}
+        for r in results:
+            a = r.get("abstain")
+            if _is_abstain_true(a):
+                abstain_true_records.append(r)
+                t = r.get("abstain_type")
+                if t is None:
+                    continue
+                t_str = str(t).strip()
+                if not t_str or t_str.lower() == "none":
+                    continue
+                type_counter[t_str] = type_counter.get(t_str, 0) + 1
+
+        true_count = len(abstain_true_records)
+        computed_rate = (true_count / total) if total else 0.0
+        rate = explicit_rate if isinstance(explicit_rate, (int, float)) else computed_rate
+
+        per_file_rows.append(
+            {
+                "baseline": baseline,
+                "file": fname,
+                "total_count": total,
+                "abstain_true_count": true_count,
+                "abstain_rate": rate,
+            }
+        )
+
+        for t, c in type_counter.items():
+            type_rows.append({"baseline": baseline, "file": fname, "abstain_type": t, "count": c})
+
+    return pd.DataFrame(per_file_rows), pd.DataFrame(type_rows)
+
+
+def load_abstain_all(abstain_base_dir: str, baselines: List[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    parts_files = []
+    parts_types = []
+    for b in baselines:
+        df_f, df_t = load_abstain_for_baseline(abstain_base_dir, b)
+        if not df_f.empty:
+            parts_files.append(df_f)
+        if not df_t.empty:
+            parts_types.append(df_t)
+    files_df = pd.concat(parts_files, ignore_index=True) if parts_files else pd.DataFrame(
+        columns=["baseline", "file", "total_count", "abstain_true_count", "abstain_rate"]
+    )
+    types_df = pd.concat(parts_types, ignore_index=True) if parts_types else pd.DataFrame(
+        columns=["baseline", "file", "abstain_type", "count"]
+    )
+    return files_df, types_df
+
+
+# Load and visualize abstain
+abstain_base_dir = os.path.join("data", "2025_11_16", "abstain_results")
+abs_files_df, abs_types_df = load_abstain_all(abstain_base_dir, baselines)
+
+if abs_files_df.empty and abs_types_df.empty:
+    st.info("No abstain data found under data/2025_11_16/abstain_results for selected baselines.")
+else:
+    st.subheader("Abstain — Per-file Summary")
+    st.dataframe(
+        abs_files_df.sort_values(["baseline", "abstain_rate", "file"], ascending=[True, False, True]).reset_index(drop=True),
+        use_container_width=True,
+    )
+
+    st.markdown("### Abstain rate (per-file distribution)")
+    box_with_mean(
+        abs_files_df,
+        x_col="baseline",
+        y_col="abstain_rate",
+        title="Abstain rate by baseline",
+    )
+
+    st.markdown("### Average number of each abstain_type per file")
+    if abs_types_df.empty:
+        st.info("No abstain types present (after filtering).")
+    else:
+        avg_types = (
+            abs_types_df
+            .groupby(["baseline", "abstain_type"], as_index=False)["count"]
+            .mean()
+            .rename(columns={"count": "avg_count_per_file"})
+        )
+        fig_types = px.bar(
+            avg_types,
+            x="abstain_type",
+            y="avg_count_per_file",
+            color="baseline",
+            barmode="group",
+            text=avg_types["avg_count_per_file"].round(2),
+            title="Average count per file by abstain_type and baseline",
+        )
+        fig_types.update_traces(textposition="outside")
+        fig_types.update_layout(yaxis_title="avg count per file")
+        st.plotly_chart(fig_types, use_container_width=True)

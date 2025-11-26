@@ -66,15 +66,25 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_file", type=str, required=True, help="Path to the input file containing data to evaluate.")
     parser.add_argument("--output_dir", type=str, default="data/abstain_results/", help="Path to the output file to save evaluation results.")
-    parser.add_argument("--baseline_name", type=str, required=True, choices=["characterai", "human_simulacra", "opencharacter", "human_interview"], help="Baseline name for the interviewee simulator.")
+    parser.add_argument("--baseline_name", type=str, required=True, choices=["characterai", "human_simulacra", "opencharacter", "human_interview", "consistent_llm"], help="Baseline name for the interviewee simulator.")
     parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash", help="LLM model to use for evaluation.")
 
     return parser.parse_args()
 
 def abstain_eval(args: argparse.Namespace):
     logging.info("Loading input data...")
-    input_data = read_json(args.input_file)
-    qa_pairs = [turn['environment_observation'][0]['response'] for turn in input_data['history'] if turn['environment_observation'][0]['observation_type']=="interviewee_response" and turn['type']!="repeat"]
+    input_data = read_json(args.input_file)['session_1']
+    evaluator_mem = input_data['agent_memory']['evaluator']
+    user_resp = [(i, item) for i, item in enumerate(evaluator_mem) if item['role']=='user']
+    qa_pairs = []
+    for idx, user_item in user_resp:
+        assistant_question = evaluator_mem[idx-1]['content']
+        user_answer = user_item['content']
+        qa_pairs.append({
+            "question": assistant_question,
+            "content": user_answer
+        })
+    breakpoint()
     result_dict = {
         "model": args.model,
         "results":[]

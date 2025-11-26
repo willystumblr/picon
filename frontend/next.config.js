@@ -3,7 +3,13 @@ const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
     // In production, API_URL should point to your Railway/Render backend
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    let apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    
+    // Ensure URL has protocol
+    if (apiUrl && !apiUrl.startsWith('http://') && !apiUrl.startsWith('https://')) {
+      apiUrl = `https://${apiUrl}`;
+    }
+    
     return [
       {
         source: '/api/:path*',

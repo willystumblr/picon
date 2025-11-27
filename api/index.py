@@ -91,7 +91,7 @@ def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
     
     agents = {
         "questioner": get_agent("questioner", "src/agents/prompts/questioner.txt", model=MODEL),
-        "extractor": get_agent("entity_extractor", "src/agents/prompts/claim_extractor_prompt.txt", model=MODEL),
+        "extractor": get_agent("entity_extractor", "src/agents/prompts/entity_extractor.txt", model=MODEL),
         "web_search": get_agent("web_search", "src/agents/prompts/websearch_prompt.txt", model=MODEL),
         "evaluator": get_agent("evaluator", "src/agents/prompts/evaluator_prompt.txt", model=MODEL),
     }

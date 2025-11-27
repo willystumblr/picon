@@ -100,7 +100,8 @@ class WebInterrogationEnv:
         
         # Pending question (waiting for response)
         self.pending_question: Optional[str] = None
-        self.pending_confirmation: Optional[str] = None
+        self.pending_confirmations: List[str] = []  # Queue of confirmation questions
+        self._last_confirmation_question: Optional[str] = None
         
     def get_progress(self) -> dict:
         """Get current progress information."""
@@ -199,7 +200,19 @@ class WebInterrogationEnv:
                 Observation(observation_type="interviewee_response", response=confirmation_response)
             )
         
-        # Continue with next question based on current phase
+        # Check if there are more pending confirmation questions
+        if self.pending_confirmations:
+            next_confirmation = self.pending_confirmations.pop(0)
+            self._last_confirmation_question = next_confirmation
+            return {
+                "next_question": None,
+                "confirmation_question": next_confirmation,
+                "phase": self.current_phase,
+                "progress": self.get_progress(),
+                "is_complete": False
+            }
+        
+        # No more confirmations - continue with next question based on current phase
         if self.current_phase == self.PHASE_PREDEFINED:
             if self.predefined_index >= len(self.predefined_questions):
                 self.current_phase = self.PHASE_MAIN
@@ -267,10 +280,10 @@ class WebInterrogationEnv:
         # Move to next predefined question or switch to main phase
         self.predefined_index += 1
         
-        # Check if there's a pending confirmation question
-        if self.pending_confirmation:
-            confirmation_q = self.pending_confirmation
-            self.pending_confirmation = None
+        # Check if there are pending confirmation questions
+        if self.pending_confirmations:
+            confirmation_q = self.pending_confirmations.pop(0)
+            self._last_confirmation_question = confirmation_q
             return {
                 "next_question": None,
                 "confirmation_question": confirmation_q,
@@ -353,10 +366,10 @@ class WebInterrogationEnv:
         )
         self.state.history.append(turn)
         
-        # Check if there's a pending confirmation question
-        if self.pending_confirmation:
-            confirmation_q = self.pending_confirmation
-            self.pending_confirmation = None
+        # Check if there are pending confirmation questions
+        if self.pending_confirmations:
+            confirmation_q = self.pending_confirmations.pop(0)
+            self._last_confirmation_question = confirmation_q
             return {
                 "next_question": None,
                 "confirmation_question": confirmation_q,
@@ -527,9 +540,8 @@ class WebInterrogationEnv:
                     
                     if "SKIP" not in confirmation_question:
                         logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
-                        # Store confirmation question for web interface to handle
-                        self.pending_confirmation = confirmation_question
-                        self._last_confirmation_question = confirmation_question
+                        # Add confirmation question to queue for web interface to handle
+                        self.pending_confirmations.append(confirmation_question)
                     else:
                         logging.info("Confirmation question skipped as per web search agent's decision.")
             

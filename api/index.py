@@ -21,7 +21,7 @@ from src.env.evaluator_test_env import EvaluatorTestEnv
 from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
-from src.utils import write_json
+from src.utils import write_json, upload_to_github 
 
 load_dotenv()
 
@@ -202,9 +202,9 @@ async def get_results(session_id: str):
         }
         
         # Save to file
-        result_path = f"data/results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+        result_path = f"interview_results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
         write_json(results, result_path)
-        
+        upload_to_github(result_path, results)
         # Clean up session
         del sessions[session_id]
         
@@ -224,8 +224,9 @@ async def cancel_session(session_id: str):
         # Save partial results
         try:
             results = env.save_state(termination_status="Cancelled by user")
-            result_path = f"data/results/human_interview/{env.interviewee.name.replace(' ', '_')}_cancelled_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-            write_json(results, result_path)
+            result_path = f"interview_results/human_interview/temp/{env.interviewee.name.replace(' ', '_')}_cancelled_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+            # write_json(results, result_path)
+            upload_to_github(result_path, results)
         except Exception as e:
             logger.warning(f"Could not save partial results: {e}")
         del sessions[session_id]

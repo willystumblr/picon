@@ -9,6 +9,7 @@ from litellm import completion
 from google import genai
 from google.genai import types
 from openai import OpenAI
+from github import Github
 
 def read_json(file_path: str) -> Any:
     with open(file_path, "r") as f:
@@ -323,3 +324,46 @@ def get_user_input_with_timeout(timeout: int) -> str:
         return user_input
     else:
         return ''  # No input within the timeout period
+    
+def upload_to_github(filename, content):
+    g = Github(os.getenv("GITHUB_TOKEN"))
+    repo = g.get_repo("sujeongim/real_human_interview")
+    try:
+        # results 폴더에 저장
+        if not filename.endswith('.json'):
+            filename += '.json'
+        filepath = f"results/{filename}"
+        
+        # 파일이 이미 존재하는지 확인
+        contents = None
+        try:
+            contents = repo.get_contents(filepath, ref="main")
+        except Exception:
+            pass  # 파일이 없으면 예외 발생 → create_file로 진행
+
+        if contents is None:
+            # 파일이 없으면 새로 생성
+            repo.create_file(filename, "Add new interview result", content, branch="main")
+            print(f"File created successfully at {filepath}!")
+        else:
+            # 파일이 있으면 업데이트(덮어쓰기)
+            repo.update_file(filename, "Update interview result", content, contents.sha, branch="main")
+            print(f"File updated successfully at {filepath}!")
+    except Exception as e:
+        logging.error(f"An error occurred while uploading {filename}: {e}", exc_info=True)
+        
+def download_from_github(filename):
+    g = Github(os.getenv("GITHUB_TOKEN"))
+    repo = g.get_repo("sujeongim/real_human_interview")
+    try:
+        # .json 확장자 자동 추가
+        if not filename.endswith('.json'):
+            filename += '.json'
+        filepath = f"results/{filename}"
+        contents = repo.get_contents(filepath, ref="main")
+        file_data = contents.decoded_content.decode('utf-8')
+        print(f"File {filepath} downloaded successfully!")
+        return file_data
+    except Exception as e:
+        print(f"An error occurred while downloading {filename}: {e}")
+        return None

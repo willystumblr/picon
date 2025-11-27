@@ -13,6 +13,7 @@ from litellm.cost_calculator import completion_cost
 from concurrent.futures import ThreadPoolExecutor
 import random
 import os
+import uuid
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
@@ -68,7 +69,7 @@ class WebInterrogationEnv:
         
         # Create a minimal interviewee object (just holds name, no input() calls)
         self.interviewee = WebInterviewee(
-            name=kwargs.get('name', 'Anonymous'),
+            name=uuid.uuid4(),
             nhd_model=kwargs.get('nhd_model', 'gpt-5')
         )
         

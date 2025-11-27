@@ -57,7 +57,7 @@ class WebInterrogationEnv:
             logging.warning("No agents provided. Initializing default agents.")
             agents = {
                 "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=model),
-                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
+                "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
                 "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=model),
                 "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=model),
             }

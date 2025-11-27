@@ -122,10 +122,48 @@ export default function InterviewPage() {
           {
             id: 'complete',
             type: 'system',
-            content: '🎉 Thank you for completing the interview! Your responses have been recorded.',
+            content: '🎉 Thank you for completing the interview! Saving your responses...',
             timestamp: new Date(),
           },
         ]);
+        
+        // Save results to backend
+        try {
+          const resultsResponse = await fetch(`/api/results/${sessionData.sessionId}`);
+          if (resultsResponse.ok) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: 'saved',
+                type: 'system',
+                content: '✅ Your responses have been saved successfully.',
+                timestamp: new Date(),
+              },
+            ]);
+          } else {
+            console.error('Failed to save results');
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: 'save-error',
+                type: 'system',
+                content: '⚠️ There was an issue saving your responses. Please contact the administrator.',
+                timestamp: new Date(),
+              },
+            ]);
+          }
+        } catch (saveErr) {
+          console.error('Error saving results:', saveErr);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: 'save-error',
+              type: 'system',
+              content: '⚠️ There was an issue saving your responses. Please contact the administrator.',
+              timestamp: new Date(),
+            },
+          ]);
+        }
       } else if (data.confirmation_question && !data.next_question) {
         // Only confirmation question returned - user needs to respond to it first
         setIsAwaitingConfirmation(true);

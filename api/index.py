@@ -46,7 +46,7 @@ sessions: Dict[str, WebInterrogationEnv] = {}
 # Fixed parameters for human interview
 MODEL = "gpt-5"
 NHD_MODEL = "gpt-5"
-NUM_TURNS = 50
+NUM_TURNS = 13
 NUM_SESSIONS = 1
 
 # Request/Response models

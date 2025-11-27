@@ -69,7 +69,7 @@ class WebInterrogationEnv:
         
         # Create a minimal interviewee object (just holds name, no input() calls)
         self.interviewee = WebInterviewee(
-            name=uuid.uuid4(),
+            name=str(uuid.uuid4())[:8],
             nhd_model=kwargs.get('nhd_model', 'gpt-5')
         )
         

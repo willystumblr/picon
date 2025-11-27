@@ -58,6 +58,7 @@ class WebSearchAgent(Agent):
                 tool_choice="required",
                 tools=self.tools,
                 reasoning_effort="low",
+                parallel_tool_calls=False,
             )
             self._calculate_cost(res)
             res_ = res.choices[0].message.model_dump()

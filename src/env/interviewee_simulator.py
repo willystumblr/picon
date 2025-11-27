@@ -5,7 +5,7 @@ import gc
 import torch
 import logging
 import re
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 from src.env.personas.human_simulacra.hs_agents import Top_agent
 from src.utils import get_completion
 from src.schemas import Action, IntervieweeResponse
@@ -20,7 +20,7 @@ nest_asyncio.apply()
 class IntervieweeSimulator:
     def __init__(self, **kwargs):
         load_dotenv()
-        assert kwargs.get('baseline_name') in ["characterai", "human_simulacra", "opencharacter", "human_interview"], "Invalid baseline name"
+        assert kwargs.get('baseline_name') in ["characterai", "human_simulacra", "opencharacter", "human_interview", "consistent_llm"], "Invalid baseline name"
         self.type = kwargs.get('baseline_name')
         self.name = kwargs.get('name', None)
 
@@ -60,12 +60,10 @@ class IntervieweeSimulator:
             assert 'model_path' in kwargs, "OpenCharacter requires (path-like, either huggingface repo OR local path) model parameter"
             assert 'persona' in kwargs, "OpenCharacter requires persona parameter"
             assert 'profile' in kwargs, "OpenCharacter requires profile parameter"
+            assert 'vllm_model_alias' in kwargs, "OpenCharacter requires vllm_model_alias parameter"
+            assert 'port' in kwargs, "OpenCharacter requires port parameter"
             
-            self.client_or_model = AutoModelForCausalLM.from_pretrained(
-                kwargs['model_path'],
-                load_in_4bit=kwargs.get('load_in_4bit', False), # default is False
-                # device_map={"":0}
-            ).to("cuda").eval()
+            self.client_or_model = kwargs['model_path']
             self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model_path'])
             self.history = [{
                 "role": "system",
@@ -76,6 +74,27 @@ class IntervieweeSimulator:
                 ),
             }]
             self.name = re.search(r'^Name:\s*(.+)$', kwargs['profile'], flags=re.MULTILINE).group(1).strip() if self.name is None else self.name
+            self.vllm_model_alias = kwargs['vllm_model_alias']
+            self.port = kwargs['port']
+
+        elif self.type == "consistent_llm":
+            assert 'model_path' in kwargs, "Consistent LLM requires (path-like, either huggingface repo OR local path) model parameter"
+            assert 'persona' in kwargs, "Consistent LLM requires persona parameter"
+            assert 'name' in kwargs, "Consistent LLM requires name parameter"
+            assert 'instruction' in kwargs, "Consistent LLM requires instruction parameter"
+            assert 'counterpart_name' in kwargs, "Consistent LLM requires counterpart_name parameter"
+            assert 'vllm_model_alias' in kwargs, "Consistent LLM requires vllm_model_alias parameter"
+            assert 'port' in kwargs, "Consistent LLM requires port parameter"
+            
+            self.client_or_model = kwargs['model_path']
+            self.vllm_model_alias = kwargs['vllm_model_alias']
+            self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model_path'])
+            self.persona = kwargs['persona']
+            self.history = []
+            self.instruction = kwargs['instruction']
+            self.counterpart_name = kwargs['counterpart_name']
+            self.prompt_flag = "Your conversation so far is below:\nConversation: \n"
+        
         else: # human_interview
             self.name = input("Enter your name: ") if self.name is None else self.name
             logging.info(f"Hi {self.name}, you will be the interviewee. Please read the instructions carefully before the interview starts.")
@@ -131,9 +150,9 @@ class IntervieweeSimulator:
                     tokenize=True,
                     return_tensors="pt",
                     add_generation_prompt=True,
-                ).to(self.client_or_model.device)
+                )
 
-                if input_ids.shape[1] <= self.client_or_model.config.max_position_embeddings:
+                if input_ids.shape[1] <= 8192:
                     break
 
                 # drop oldest assistant-user pair but keep system prompt
@@ -143,23 +162,52 @@ class IntervieweeSimulator:
                     # still too long even after pruning – fallback
                     self.history = [self.history[0]] + self.history[-2:]
 
-            with torch.no_grad():
-                output_ids = self.client_or_model.generate(
-                    input_ids,
-                    max_new_tokens=1024, # following the original config
-                    do_sample=True,
-                    temperature=0.9,
-                    top_p=0.9,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                )
+            res = get_completion(
+                model=f"hosted_vllm/{self.vllm_model_alias}",
+                messages=self.history,
+                reasoning_effort="low",
+                api_base=f"http://localhost:{self.port}/v1",
+                max_tokens=1024,
+                temperature=0.9,
+                top_p=0.9,
+            )
             
-            response = self.tokenizer.decode(output_ids[0][input_ids.shape[-1]:], skip_special_tokens=True)
+            response = res.choices[0].message.content.strip()
             self.history.append({
                 "role": "assistant",
                 "content": response
             })
+        elif self.type == "consistent_llm" : # Consistent LLM & OpenCharacter (local vLLM)
+            self.history.append(f"Interviewer: {message}")
             
+            while True:
+                input_message = self.persona + self.prompt_flag + '\n'.join(self.history) + self.instruction
+                messages = [{
+                    "role": "user",
+                    "content": input_message
+                }]
+                input_ids = self.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=True,
+                    return_tensors="pt",
+                    add_generation_prompt=True,
+                )
+
+                if input_ids.shape[1] <= 8192: # assuming model max position is 8192
+                    break
+                
+                self.history = self.history[2:]  # drop the oldest message
+                
+            res = get_completion(
+                model=f"hosted_vllm/{self.vllm_model_alias}",
+                messages=[{"role":"system", "content": self.persona}, {"role":"user", "content": input_message}],
+                reasoning_effort="low",
+                api_base=f"http://localhost:{self.port}/v1",
+                max_tokens=1024
+            )
+            # response = self.tokenizer.decode(output_ids[0][input_ids.shape[-1]:], skip_special_tokens=True)    
+            response = res.choices[0].message.content.strip()
+            self.history.append(f"{self.name}: {response}")
         else:  # human_interview
             response = input(f"Your Response: ")
         
@@ -200,7 +248,7 @@ class IntervieweeSimulator:
             logging.error(f"Failed to set up the cai client: {e}")
             await self.client_or_model.close_session()
     def clear_model(self):
-        if self.type == "opencharacter": # no action needed for other types
+        if self.type == "opencharacter" or self.type == "consistent_llm": # no action needed for other types
             del self.client_or_model
             gc.collect()
             torch.cuda.empty_cache()

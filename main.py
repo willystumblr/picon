@@ -1,5 +1,5 @@
 import os
-from src.utils import setup_logging, read_json, write_json, get_user_input_with_timeout
+from src.utils import setup_logging, read_json, write_json, get_user_input_with_timeout, read_jsonl
 from src.env.interrogation_env import InterrogationEnv
 from src.env.evaluator_test_env import EvaluatorTestEnv
 from src.agents.agent_factory import get_agent
@@ -16,8 +16,10 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
-    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'human_interview'])
+    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview'])
     parser.add_argument('--model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the interrogation.')
+    parser.add_argument('--vllm_model_alias', type=str, help='Alias for the vLLM model.')
+    parser.add_argument('--port', type=int, default=8000, help='Port number for the server.')
     parser.add_argument('--nhd_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the NHD detector in the interviewee simulator.')
     parser.add_argument('--hs_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the Human Simulacra interviewee simulator.')
     parser.add_argument('--num_turns', type=int, default=30, help='Maximum number of turns in the interrogation.')
@@ -116,6 +118,14 @@ def main(args, interviewee_kwarg):
         "inter_session_score": evaluator_env.inter_session_score,
         "inter_session_results": evaluator_env.inter_session_results
     }
+    results_complete["abstention_eval"] = {
+        "abstention_rate": evaluator_env.abstention_rate,
+        "abstention_results": evaluator_env.abstention_results
+    }
+    results_complete["eval_cost"] = evaluator_env.env_cost
+    # results_complete["total_cost"] = evaluator_env.env_cost
+    # for session in results_complete.values():
+    #     results_complete["total_cost"] += session['cost']['total_cost']
     write_json(results_complete, result_path)
     logging.info(f"Saved results to {result_path}.")
 
@@ -163,7 +173,28 @@ if __name__ == "__main__":
                 "name": name_match.group(1).strip(),
                 "load_in_4bit": True,
                 "nhd_model": args.nhd_model,
-                "question_seed": args.question_seed
+                "question_seed": args.question_seed,
+                "vllm_model_alias": args.vllm_model_alias,
+                "port": args.port
+            })
+    elif args.baseline_name == "consistent_llm":
+        dataset = read_jsonl("src/env/personas/consistent_llm_personas.jsonl")
+        if args.sample:
+            import random
+            random.seed(args.seed)
+            dataset = random.sample(dataset, k=10)
+        for data in dataset:
+            interviewee_kwargs.append({
+                "baseline_name": "consistent_llm",
+                "model_path": "/home/edlab/sjim/consistent-LLMs/rl_training/checkpoints/chatting/llama-8b-sft-ppo-prompt",
+                "persona": data['persona'],
+                "name": data['name'],
+                "counterpart_name": data['counterpart_name'],
+                "instruction": data['instruction'],
+                "nhd_model": args.nhd_model,
+                "question_seed": args.question_seed,
+                "vllm_model_alias": args.vllm_model_alias,
+                "port": args.port
             })
     elif args.baseline_name == "human_interview":
         interviewee_kwargs = [{
@@ -191,8 +222,7 @@ if __name__ == "__main__":
             else:
                 logging.info("Invalid input. Please enter Y or N.")
     
-    executor_type = ProcessPoolExecutor if args.baseline_name == "opencharacter" else ThreadPoolExecutor
-    with executor_type(max_workers=args.max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         futures = {executor.submit(main, args, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
         for future in as_completed(futures):
             interviewee_kwarg = futures[future]

@@ -40,7 +40,7 @@ def load_metrics_from_dir(dir_path: str, source_label: str) -> pd.DataFrame:
 
         ext = data.get("external_consistency", {})
         intl = data.get("internal_consistency", {})
-        rpt = data.get("repeat", {})
+        rpt = data.get("repeat_score", {})
 
         rows.append({
             "file": fname,
@@ -122,7 +122,7 @@ def boxplot_metric_multi(df: pd.DataFrame, value_col: str, title: str):
             text=mean_df[value_col].round(4).astype(str),
             textposition="top center",
             textfont=dict(
-                size=14,         # ← 글씨 크게
+                size=12,         # ← 글씨 크게
                 color="black",   # ← 글씨 색 진하게
                 family="Arial"   # (선택) 좀 읽기 쉬운 폰트
             ),

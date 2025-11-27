@@ -38,6 +38,7 @@ export default function InterviewPage() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -102,6 +103,7 @@ export default function InterviewPage() {
         body: JSON.stringify({
           session_id: sessionData.sessionId,
           response: userMessage,
+          is_confirmation: isAwaitingConfirmation,
         }),
       });
 
@@ -114,6 +116,7 @@ export default function InterviewPage() {
 
       if (data.is_complete) {
         setIsComplete(true);
+        setIsAwaitingConfirmation(false);
         setMessages((prev) => [
           ...prev,
           {
@@ -123,21 +126,21 @@ export default function InterviewPage() {
             timestamp: new Date(),
           },
         ]);
+      } else if (data.confirmation_question && !data.next_question) {
+        // Only confirmation question returned - user needs to respond to it first
+        setIsAwaitingConfirmation(true);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `q-${Date.now()}`,
+            type: 'system',
+            content: data.confirmation_question,
+            timestamp: new Date(),
+          },
+        ]);
       } else if (data.next_question) {
-        // Add confirmation question if present
-        if (data.confirmation_question) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `confirm-${Date.now()}`,
-              type: 'system',
-              content: data.confirmation_question,
-              timestamp: new Date(),
-            },
-          ]);
-        }
-
-        // Add next question
+        // Regular next question (confirmation already handled or no confirmation)
+        setIsAwaitingConfirmation(false);
         setMessages((prev) => [
           ...prev,
           {

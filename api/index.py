@@ -64,6 +64,7 @@ class StartInterviewResponse(BaseModel):
 class RespondRequest(BaseModel):
     session_id: str
     response: str
+    is_confirmation: Optional[bool] = False
 
 class RespondResponse(BaseModel):
     next_question: Optional[str]
@@ -150,7 +151,7 @@ async def submit_response(request: RespondRequest):
         env = sessions[request.session_id]
         
         # Process response and get next question
-        result = env.process_response(request.response)
+        result = env.process_response(request.response, is_confirmation=request.is_confirmation)
         
         return RespondResponse(
             next_question=result.get("next_question"),

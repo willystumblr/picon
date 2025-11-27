@@ -326,7 +326,16 @@ def get_user_input_with_timeout(timeout: int) -> str:
         return ''  # No input within the timeout period
     
 def upload_to_github(filename, content):
-    g = Github(os.getenv("GITHUB_TOKEN"))
+    if not isinstance(content, str):
+        content = json.dumps(content, indent=4, ensure_ascii=False)
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        logging.error("GITHUB_TOKEN environment variable is not set!")
+        raise ValueError("GITHUB_TOKEN not configured")
+    
+    logging.info(f"Attempting GitHub upload with token: {token[:8]}...{token[-4:] if len(token) > 12 else ''}")
+    
+    g = Github(token)
     repo = g.get_repo("sujeongim/real_human_interview")
     try:
         # results 폴더에 저장

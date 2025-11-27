@@ -325,7 +325,7 @@ export default function InterviewPage() {
         <div className="bg-green-50 border-t border-green-200 px-4 py-4 text-center">
           <p className="text-green-700 font-medium">Interview Complete! 🎉</p>
           <p className="text-sm text-green-600 mt-1">
-            Thank you for your participation. You may now close this window.
+            Thank you for your participation. Please wait until the results are processed.
           </p>
         </div>
       )}

@@ -59,6 +59,8 @@ class EvaluatorTestEnv:
         
         self.inter_session_data = {}
         for session_id, d in all_data.items():
+            if not session_id.startswith('session_'):
+                continue
             get_to_knows = [turn["environment_observation"][0]['response'] for turn in d['history'] if turn['type'] == "get_to_know"]
             self.inter_session_data[session_id] = get_to_knows
         # gather each question-response pair across sessions
@@ -143,8 +145,16 @@ class EvaluatorTestEnv:
         return verdict
     
     def abstention_eval(self):
-        qa_pairs = [turn['environment_observation'][0]['response'] for turn in self.history if turn['environment_observation'][0]['observation_type']=="interviewee_response" and turn['type']!="repeat"]
-
+        evaluator_mem = self.evaluator_history
+        user_resp = [(i, item) for i, item in enumerate(evaluator_mem) if item['role']=='user']
+        qa_pairs = []
+        for idx, user_item in user_resp:
+            assistant_question = evaluator_mem[idx-1]['content']
+            user_answer = user_item['content']
+            qa_pairs.append({
+                "question": assistant_question,
+                "content": user_answer
+            })
         class OutputSchema(BaseModel):
             abstain: Literal['true', 'partially true', 'false'] = Field(..., description="Whether the provided response is abstaining from answering the question.")
             reason : str = Field(..., description="A brief explanation for the abstention decision.")

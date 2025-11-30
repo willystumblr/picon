@@ -194,14 +194,20 @@ async def get_results(session_id: str):
             "conflict_count": evaluator_env.external_conflict,
             "plausible_count": evaluator_env.external_plausible,
             "consistency_rate": (evaluator_env.external_plausible / evaluator_env.external_count) if evaluator_env.external_count > 0 else None,
+            "conflict_verdicts": evaluator_env.external_conflict_verdicts
         }
         results["internal_consistency"] = {
             "total_evaluations": evaluator_env.internal_count,
             "conflict_count": evaluator_env.internal_conflict,
             "plausible_count": evaluator_env.internal_plausible,
             "consistency_rate": (evaluator_env.internal_plausible / evaluator_env.internal_count) if evaluator_env.internal_count > 0 else None,
+            "conflict_verdicts": evaluator_env.internal_conflict_verdicts
         }
-        
+        results["abstention_eval"] = {
+            "abstention_rate": evaluator_env.abstention_rate,
+            "abstention_results": evaluator_env.abstention_results
+        }
+        results["eval_cost"] = evaluator_env.env_cost
         # Save to file
         result_path = f"interview_results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
         write_json(results, result_path)

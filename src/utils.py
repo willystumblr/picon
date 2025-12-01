@@ -325,7 +325,7 @@ def get_user_input_with_timeout(timeout: int) -> str:
     else:
         return ''  # No input within the timeout period
     
-def upload_to_github(filename, content):
+def upload_to_github(filepath, content):
     if not isinstance(content, str):
         content = json.dumps(content, indent=4, ensure_ascii=False)
     token = os.getenv("GITHUB_TOKEN")
@@ -341,7 +341,6 @@ def upload_to_github(filename, content):
         # results 폴더에 저장
         if not filename.endswith('.json'):
             filename += '.json'
-        filepath = f"results/{filename}"
         
         # 파일이 이미 존재하는지 확인
         contents = None
@@ -352,23 +351,23 @@ def upload_to_github(filename, content):
 
         if contents is None:
             # 파일이 없으면 새로 생성
-            repo.create_file(filename, "Add new interview result", content, branch="main")
-            print(f"File created successfully at {filepath}!")
+            repo.create_file(filepath, "Add new interview result", content, branch="main")
+            logging.info(f"File created successfully at {filepath}!")
         else:
             # 파일이 있으면 업데이트(덮어쓰기)
-            repo.update_file(filename, "Update interview result", content, contents.sha, branch="main")
-            print(f"File updated successfully at {filepath}!")
+            repo.update_file(filepath, "Update interview result", content, contents.sha, branch="main")
+            logging.info(f"File updated successfully at {filepath}!")
     except Exception as e:
         logging.error(f"An error occurred while uploading {filename}: {e}", exc_info=True)
+        raise  # Re-raise the exception so caller knows upload failed
         
-def download_from_github(filename):
+def download_from_github(filepath):
     g = Github(os.getenv("GITHUB_TOKEN"))
     repo = g.get_repo("sujeongim/real_human_interview")
     try:
         # .json 확장자 자동 추가
-        if not filename.endswith('.json'):
-            filename += '.json'
-        filepath = f"results/{filename}"
+        if not filepath.endswith('.json'):
+            filepath += '.json'
         contents = repo.get_contents(filepath, ref="main")
         file_data = contents.decoded_content.decode('utf-8')
         print(f"File {filepath} downloaded successfully!")

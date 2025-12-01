@@ -169,8 +169,9 @@ async def submit_response(request: RespondRequest):
 async def get_results(session_id: str):
     """Get the final results for a completed interview."""
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found. It may have already been processed.")
     
+    env = None
     try:
         env = sessions[session_id]
         
@@ -178,15 +179,18 @@ async def get_results(session_id: str):
             raise HTTPException(status_code=400, detail="Interview not yet complete")
         
         # Run evaluation
+        logger.info(f"[{session_id}] Starting save_state...")
         results = env.save_state()
         
         # Run evaluator
+        logger.info(f"[{session_id}] Starting evaluator...")
         evaluator_env = EvaluatorTestEnv(
             model=MODEL,
             interview_path={"session_1": results}
         )
         evaluator_env.reset()
         evaluator_env.step()
+        logger.info(f"[{session_id}] Evaluator completed.")
         
         # Add evaluation results
         results["external_consistency"] = {
@@ -208,19 +212,32 @@ async def get_results(session_id: str):
             "abstention_results": evaluator_env.abstention_results
         }
         results["eval_cost"] = evaluator_env.env_cost
-        # Save to file
-        result_path = f"interview_results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-        write_json(results, result_path)
-        upload_to_github(result_path, results)
-        # Clean up session
-        del sessions[session_id]
         
-        return ResultsResponse(session_id=session_id, results=results)
+        # Save to file - do this BEFORE preparing response
+        result_path = f"interview_results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+        logger.info(f"[{session_id}] Uploading to GitHub: {result_path}")
+        upload_to_github(result_path, results)
+        logger.info(f"[{session_id}] Upload successful.")
+        
+        # Prepare response BEFORE deleting session
+        response = ResultsResponse(session_id=session_id, results=results)
+        
+        # Clean up session only after response is prepared
+        del sessions[session_id]
+        logger.info(f"[{session_id}] Session cleaned up, returning response.")
+        
+        return response
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error getting results: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"[{session_id}] Error getting results: {e}")
+        # If upload succeeded but we failed later, still try to clean up
+        if session_id in sessions:
+            try:
+                del sessions[session_id]
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Error processing results: {str(e)}")
 
 
 @app.delete("/api/session/{session_id}")

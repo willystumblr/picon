@@ -354,7 +354,8 @@ if __name__ == "__main__":
 
     env = EvaluatorTestEnv(
         model=args.model,
-        interview_path=args.interview_path
+        interview_path=args.interview_path,
+        port=8888
     )
     state = env.reset()
     env.step()

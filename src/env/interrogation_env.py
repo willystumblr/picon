@@ -225,7 +225,7 @@ class InterrogationEnv:
                         assert self.agents['questioner'].port is not None, "Port must be specified for hosted_vllm models."    
                         completion_kwargs['api_base'] = f"http://localhost:{self.agents['questioner'].port}/v1"
                     res = get_completion(**completion_kwargs)
-                    self.env_cost += completion_cost(res) if not self.agents['questioner'].startswith("hosted_vllm/") else 0.0
+                    self.env_cost += completion_cost(res) if not self.agents['questioner'].model.startswith("hosted_vllm/") else 0.0
                     confirmation_question = res.choices[0].message.content.strip()
                     if "SKIP" not in confirmation_question:
                         logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
@@ -296,7 +296,7 @@ class InterrogationEnv:
             
             inital_response = self.state.history[i].environment_observation[0].response.content
             while True:
-                res = get_completion(
+                completion_kwargs = dict(
                     model=self.agents['evaluator'].model,
                     messages=[
                         {"role": "system", "content": REPEAT_PROMPT},
@@ -304,6 +304,10 @@ class InterrogationEnv:
                     ],
                     reasoning_effort="low",
                 )
+                if self.agents['evaluator'].model.startswith("hosted_vllm/"):
+                    assert self.agents['evaluator'].port is not None, "Port must be specified for hosted_vllm models."    
+                    completion_kwargs['api_base'] = f"http://localhost:{self.agents['evaluator'].port}/v1"
+                res = get_completion(**completion_kwargs)
                 self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
                 judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
                 if judge in ["TRUE", "FALSE"]:

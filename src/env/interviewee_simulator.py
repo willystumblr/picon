@@ -28,6 +28,9 @@ class IntervieweeSimulator:
         project_root = os.path.dirname(os.path.dirname(current_dir))
         self.__nhd_prompt = open(f"{project_root}/src/agents/prompts/nhd_detector.txt", "r").read()
         self.__nhd_model = kwargs.get('nhd_model', "gemini/gemini-2.5-flash")
+        self.__nhd_port = kwargs.get('nhd_port', None)
+        if self.__nhd_model.startswith("hosted_vllm/"):
+            assert self.__nhd_port is not None, "NHD port must be provided for hosted_vllm models"
         self.cost = 0.0
         
         if self.type == "characterai":
@@ -164,7 +167,7 @@ class IntervieweeSimulator:
                     self.history = [self.history[0]] + self.history[-2:]
 
             res = get_completion(
-                model=f"hosted_vllm/{self.vllm_model_alias}",
+                model=f"hosted_vllm/{self.simulator_model}",
                 messages=self.history,
                 reasoning_effort="low",
                 api_base=f"http://localhost:{self.port}/v1",
@@ -200,7 +203,7 @@ class IntervieweeSimulator:
                 self.history = self.history[2:]  # drop the oldest message
                 
             res = get_completion(
-                model=f"hosted_vllm/{self.vllm_model_alias}",
+                model=f"hosted_vllm/{self.simulator_model}",
                 messages=[{"role":"system", "content": self.persona}, {"role":"user", "content": input_message}],
                 reasoning_effort="low",
                 api_base=f"http://localhost:{self.port}/v1",
@@ -215,12 +218,15 @@ class IntervieweeSimulator:
         assert response is not None and response.strip() != "", "Received empty response from the interviewee."
         # nhd
         while True:
-            res = get_completion(
+            completion_kwargs = dict(
                 model=self.__nhd_model,
                 messages=[{"role":"system", "content": self.__nhd_prompt}, {"role":"user", "content": f"Interviewer:{message}\nInterviewee: {response}"}],
                 reasoning_effort="low",
                 temperature=1.0 if self.__nhd_model.startswith("gpt") else 0.0,
             )
+            if self.__nhd_model.startswith("hosted_vllm/"):
+                completion_kwargs['api_base'] = f"http://localhost:{self.__nhd_port}/v1"
+            res = get_completion(**completion_kwargs)
             self.cost += completion_cost(res) if not self.__nhd_model.startswith("hosted_vllm/") else 0.0
             res_ = res.choices[0].message.content.strip()
             if res_ in ['### PASS ###', '### FAIL ###']:

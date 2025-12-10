@@ -42,7 +42,7 @@ class WebSearchAgent(Agent):
             for qa in history:
                 prompt += f"Interviewer: \"{qa['question']}\"\nInterviewee: \"{qa['answer']}\"\n\n"
             prompt += prompt_format
-            res = get_completion(
+            completion_kwargs = dict(
                 model=self.model,
                 messages=self.memory + [{"role": "user", "content": prompt}],
                 tool_choice="none",
@@ -50,6 +50,10 @@ class WebSearchAgent(Agent):
                 reasoning_effort="low",
                 response_format=ResponseFormat,
             )
+            if self.model.startswith("hosted_vllm/"):
+                assert self.port is not None, "Port must be specified for hosted_vllm models."    
+                completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+            res = get_completion(**completion_kwargs)
             self._calculate_cost(res)
             proceed_to_web_search = ResponseFormat.model_validate_json(res.choices[0].message.content).type.lower()
             if proceed_to_web_search in ['yes', 'no']:

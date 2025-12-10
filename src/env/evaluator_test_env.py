@@ -33,6 +33,7 @@ class EvaluatorTestEnv:
         project_root = os.path.dirname(os.path.dirname(current_dir))
         # self.agent = get_agent("evaluator", model=model, system_message_path=f"{project_root}/src/env/evaluator_prompt.txt")
         self.model = model
+        self.port = kwargs.get('port', None)
         self.start_time = time.time()
         self.env_cost = 0.0
         self.interview_path = interview_path

@@ -52,7 +52,8 @@ class IntervieweeSimulator:
         elif self.type == "human_simulacra":
             #### **name** are required
             assert 'name' in kwargs, "Human Simulacra requires name parameter"
-            self.client_or_model = Top_agent(character_name=kwargs['name'], model=kwargs['hs_model']) ### has its own chat history
+            assert 'simulator_model' in kwargs, "Human Simulacra requires simulator_model parameter"
+            self.client_or_model = Top_agent(character_name=kwargs['name'], model=kwargs['simulator_model']) ### has its own chat history
             
         elif self.type == "opencharacter": 
             #### **model_path, persona, profile** are required ####
@@ -60,7 +61,7 @@ class IntervieweeSimulator:
             assert 'model_path' in kwargs, "OpenCharacter requires (path-like, either huggingface repo OR local path) model parameter"
             assert 'persona' in kwargs, "OpenCharacter requires persona parameter"
             assert 'profile' in kwargs, "OpenCharacter requires profile parameter"
-            assert 'vllm_model_alias' in kwargs, "OpenCharacter requires vllm_model_alias parameter"
+            assert 'simulator_model' in kwargs, "OpenCharacter requires simulator_model parameter"
             assert 'port' in kwargs, "OpenCharacter requires port parameter"
             
             self.client_or_model = kwargs['model_path']
@@ -74,7 +75,7 @@ class IntervieweeSimulator:
                 ),
             }]
             self.name = re.search(r'^Name:\s*(.+)$', kwargs['profile'], flags=re.MULTILINE).group(1).strip() if self.name is None else self.name
-            self.vllm_model_alias = kwargs['vllm_model_alias']
+            self.simulator_model = kwargs['simulator_model']
             self.port = kwargs['port']
 
         elif self.type == "consistent_llm":
@@ -83,11 +84,11 @@ class IntervieweeSimulator:
             assert 'name' in kwargs, "Consistent LLM requires name parameter"
             assert 'instruction' in kwargs, "Consistent LLM requires instruction parameter"
             assert 'counterpart_name' in kwargs, "Consistent LLM requires counterpart_name parameter"
-            assert 'vllm_model_alias' in kwargs, "Consistent LLM requires vllm_model_alias parameter"
+            assert 'simulator_model' in kwargs, "Consistent LLM requires simulator_model parameter"
             assert 'port' in kwargs, "Consistent LLM requires port parameter"
             
             self.client_or_model = kwargs['model_path']
-            self.vllm_model_alias = kwargs['vllm_model_alias']
+            self.simulator_model = kwargs['simulator_model']
             self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model_path'])
             self.persona = kwargs['persona']
             self.history = []
@@ -220,10 +221,13 @@ class IntervieweeSimulator:
                 reasoning_effort="low",
                 temperature=1.0 if self.__nhd_model.startswith("gpt") else 0.0,
             )
-            self.cost += completion_cost(res)
+            self.cost += completion_cost(res) if not self.__nhd_model.startswith("hosted_vllm/") else 0.0
             res_ = res.choices[0].message.content.strip()
             if res_ in ['### PASS ###', '### FAIL ###']:
                 break
+            else:
+                logging.warning("NHD Detector returned invalid response. Retrying...")
+                logging.warning(f"Response was: {res_}")
         if res_ == '### FAIL ###':
             logging.warning("AI Detected! Terminating the interview: " + response)
             raise ValueError("AI Detected")

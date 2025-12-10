@@ -373,5 +373,5 @@ def download_from_github(filepath):
         print(f"File {filepath} downloaded successfully!")
         return file_data
     except Exception as e:
-        print(f"An error occurred while downloading {filename}: {e}")
+        print(f"An error occurred while downloading {filepath}: {e}")
         return None

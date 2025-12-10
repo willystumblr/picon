@@ -17,7 +17,8 @@ class QuestionerAgent(Agent):
         super().__init__(
             role=kwargs.get('role', "questioner"),
             system_message=kwargs.get('system_message', ""),
-            model=kwargs.get('model', "gemini/gemini-2.5-flash")
+            model=kwargs.get('model', "gemini/gemini-2.5-flash"),
+            port=kwargs.get('port', None)
         )
 
     def set_cutoff_date(self, cutoff_date: str) -> None:
@@ -43,12 +44,15 @@ class QuestionerAgent(Agent):
                         "You may refer to this verdict for the next question formulation.\n\n"
                         f"Verdict: {json.dumps(verdict)}"
             )
-        
-        res = get_completion(
+        completion_kwargs = dict(
             model=self.model,
             messages=self.memory,
             reasoning_effort="low"
         )
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+        res = get_completion(**completion_kwargs)
         self._calculate_cost(res)
         # logging.info(f"[REASONING TRACE] {self.role} {res.choices[0].message.reasoning_content}")
         question = res.choices[0].message.content.strip()

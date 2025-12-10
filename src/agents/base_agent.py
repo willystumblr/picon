@@ -17,6 +17,7 @@ class Agent(ABC):
         else:
             logging.warning("No model specified for the agent. Setting model to the default value: 'gemini/gemini-2.5-flash'.")
             self.model = 'gemini/gemini-2.5-flash'
+        self.port = kwargs.get('port', None)
         self.cost = 0.0
 
     @abstractmethod
@@ -29,4 +30,4 @@ class Agent(ABC):
         self.memory = self.memory[:1]  # keep only the system message
     
     def _calculate_cost(self, response):
-        self.cost += completion_cost(response)
+        self.cost += completion_cost(response) if not self.model.startswith("hosted_vllm/") else 0.0

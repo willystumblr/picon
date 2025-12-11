@@ -106,4 +106,4 @@ if __name__ == "__main__":
     done = False
     while not done:
         state, done = env.step()
-    env.save_state(f"data/prompt_engineering/entity_extractor/entity_extractor_{time.strftime('%Y%m%d_%H%M%S')}_{args.model}_{args.interview_data_path.split('/')[-1].split('.')[0]}.json")
+    env.save_state(f"data/prompt_engineering/entity_extractor/entity_extractor_{time.strftime('%Y%m%d_%H%M%S')}_{args.model.split('/')[-1]}_{args.interview_data_path.split('/')[-1].split('.')[0]}.json")

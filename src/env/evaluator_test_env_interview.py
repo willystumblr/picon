@@ -13,15 +13,10 @@ from dotenv import load_dotenv
 from itertools import combinations
 from concurrent.futures import ThreadPoolExecutor
 
-class EvaluationResponseInternal(BaseModel):
+class EvaluationResponse(BaseModel):
     verdict: Literal['conflict', 'plausible']  # 'conflict' or 'plausible'
     rationale: str  # explanation for the verdict
-    ground: Literal['internal'] = Field(description="Ground for the verdict. The verdict is based on the internal context (i.e., the conversation history without external information)")
-
-class EvaluationResponseExternal(BaseModel):
-    verdict: Literal['conflict', 'plausible']  # 'conflict' or 'plausible'
-    rationale: str  # explanation for the verdict
-    ground: Literal['external'] = Field(description="Ground for the verdict. The verdict is based on external web search results.")
+    ground: Literal['internal', 'external'] = Field(description="Ground for the verdict. If `internal`, the verdict is based on the internal context (i.e., the conversation history without external information). If `external`, it is based on external web search results.")
 
 REPEAT_PROMPT = """You will be given a single question and two or more corresponding answers. Determine whether the the answers are essentially the same in meaning.
 If they are, output TRUE. If they are not, output FALSE.
@@ -30,8 +25,8 @@ Do not output any additional explanation or text."""
 class EvaluatorTestEnv:
     def __init__(
         self, 
-        model: str, 
-        interview_path: str,
+        model, 
+        interview_result,
         **kwargs
         ):
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -40,15 +35,10 @@ class EvaluatorTestEnv:
         self.model = model
         self.start_time = time.time()
         self.env_cost = 0.0
-        self.interview_path = interview_path
-        self.all_data = read_json(interview_path) if isinstance(interview_path, str) else interview_path
-        if "session_1" in self.all_data and "session_2" in self.all_data:
-            data = self.all_data["session_1"]
-            self.num_sessions = 2
-        else:
-            data = self.all_data
-            self.num_sessions = 1
-        
+        data = interview_result
+        #breakpoint()
+        #data = list(all_data.values())[0]  # first interview session per file
+        self.num_sessions = 1
         self.evaluator_history = data["agent_memory"]["evaluator"]
         self.evaluator_history = [self.evaluator_history[i] for i in range(len(self.evaluator_history)) if self.evaluator_history[i-1]!=self.evaluator_history[i] or i==0]
         #self.history = data['history']
@@ -68,33 +58,18 @@ class EvaluatorTestEnv:
         self.all_verdicts = []
         
         self.inter_session_data = {}
-        self.abstention_rate = 0.0
-        self.abstention_results = []
+        session_id = 0
+
+        get_to_knows = [turn["environment_observation"][0]['response'] for turn in data['history'] if turn['type'] == "get_to_know"]
+        self.inter_session_data[session_id] = get_to_knows
+        # gather each question-response pair across sessions
         self.inter_session_results = []
         self.inter_session_score = None
-
-        if self.num_sessions > 1:
-            for session_id in ['session_'+str(i+1) for i in range(self.num_sessions)]:
-                d = self.all_data[session_id]
-                get_to_knows = [turn["environment_observation"][0]['response'] for turn in d['history'] if turn['type'] == "get_to_know"]
-                self.inter_session_data[session_id] = get_to_knows
-            # gather each question-response pair across sessions
-
-        self.abstention_prompt = open(f"{current_dir}/abstain_analysis_prompt.txt", "r").read()
-            
         
     def reset(self):
         """reset the environment"""
         # self.state = State(current_turn=1, history=[]) # n-th turn indicates the n-th user response
         self.user_indices = [i for i in range(0, len(self.evaluator_history)) if self.evaluator_history[i]['role']=='user'] # every 3 turns correspond to one user response
-        
-        self.qa_pairs = [
-            { 
-                'question': self.evaluator_history[i-1]['content'],
-                'content': self.evaluator_history[i]['content']
-            } 
-            for i in self.user_indices if self.evaluator_history[i-2]['role']!='tool'
-        ]
         self.user_indices.pop(0)  # remove the first user input which is the initial question
 
     def _find_turn_idx(self, idx) -> int:
@@ -127,7 +102,7 @@ class EvaluatorTestEnv:
                     "response": response,
                     "verdict": verdict_action.content,
                 })
-            elif verdict_action.content['ground'] == 'external':
+            else:
                 self.external_count += 1
                 self.external_conflict += 1
                 self.external_conflict_verdicts.append({
@@ -142,113 +117,58 @@ class EvaluatorTestEnv:
             if verdict_action.content['ground'] == 'internal':
                 self.internal_count += 1
                 self.internal_plausible += 1
-            elif verdict_action.content['ground'] == 'external':
+            else:
                 self.external_count += 1
                 self.external_plausible += 1
     
     def generate_verdict(self, messages: List[Dict[str, Any]]) -> Action:
         #print(messages[-3]['role'])
         if messages[-3]['role']=='tool':
-            response_format = EvaluationResponseExternal
-            ground = "external"
+            ground = 'external'
         else:
-            response_format = EvaluationResponseInternal
-            ground = "internal"
+            ground = 'internal'
             
         verdict = get_completion(
             model=self.model,
-            #messages=messages[:-1] + [{'role' : messages[-1]['role'] , 'content': messages[-1]['content'] + f"[conflict type] ground: {ground}"}], 
-            messages=messages,
+            messages=messages[:-1] + [{'role' : messages[-1]['role'] , 'content': messages[-1]['content'] + f"[conflict type] ground: {ground}"}], 
             temperature=1.0,
-            response_format=response_format
+            response_format=EvaluationResponse
         )
-        self.env_cost += completion_cost(verdict)
-        return verdict, response_format
+        return verdict
     
-    def abstention_eval(self):
-        #qa_pairs = [turn['environment_observation'][0]['response'] for turn in self.history if turn['environment_observation'][0]['observation_type']=="interviewee_response" and turn['type']!="repeat"]
-
-        class OutputSchema(BaseModel):
-            abstain: Literal['true', 'partially true', 'false'] = Field(..., description="Whether the provided response is abstaining from answering the question.")
-            reason : str = Field(..., description="A brief explanation for the abstention decision.")
-            abstain_type: Literal['none', 'refusal', 'lack info', 'asking back', 'unrelated'] = Field(..., description="The type of abstention (e.g., 'lack info', 'unknown', etc.).")
-
-        logging.info(f"Evaluating {len(self.qa_pairs)} QA pairs...")
-        with ThreadPoolExecutor(max_workers=16) as executor: # tqdm progress bar
-            results = list(tqdm(executor.map(
-                lambda qa: get_completion(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": self.abstention_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Question: {qa['question']}\nAnswer: {qa['content']}"
-                        }
-                    ],
-                    response_format=OutputSchema,
-                ), self.qa_pairs), total=len(self.qa_pairs), desc="Evaluating QA pairs")
-            )
-        self.env_cost += sum(completion_cost(res) for res in results)
-        logging.info("Evaluation completed.")
-    
-        outputs = [OutputSchema.model_validate_json(res.choices[0].message.content) if res.choices[0].message.content else None for res in results]
-        total_abstain_count = sum(1 for res in outputs if res and res.abstain!='false')    
-        print(f"Total abstentions: {total_abstain_count} out of {len(self.qa_pairs)}")
-        self.abstention_rate = total_abstain_count / len(self.qa_pairs)
-
-        for i, res in enumerate(results):
-            content = res.choices[0].message.content
-            parsed_content = OutputSchema.model_validate_json(content)  # Validate the response
-            
-            self.abstention_results.append({
-                "question": self.qa_pairs[i]['question'],
-                "answer": self.qa_pairs[i]['content'],
-                "abstain": parsed_content.abstain,
-                "reason": parsed_content.reason,
-                "abstain_type": parsed_content.abstain_type
-            })
-
-
-
     def step(self): # Interviewee's response -> Extractor -> WebSearch (optional) -> Questioner -> Interviewee
         """run one turn of the interrogation: process all at once"""
         messages_list = [
             self.evaluator_history[:i+1] for i in self.user_indices
         ]
-        if "external_consistency" not in self.all_data or "internal_consistency" not in self.all_data :
-            logging.info(f"[EVALUATOR] Evaluating {len(messages_list)} user responses for consistency.")
-            with ThreadPoolExecutor(max_workers=16) as executor:
-                verdicts = list(tqdm(executor.map(
-                    lambda messages: self.generate_verdict(messages),
-                    messages_list
-                )))
-            
-            for idx, verdict in zip(self.user_indices, verdicts):
-                verdict, response_format = verdict
-                try:
-                    # if verdict.choices[0].message.content.strip().find('"ground":"external"') != -1:
-                    #     EvaluationResponse = EvaluationResponseExternal
-                    # else:
-                    #     EvaluationResponse = EvaluationResponseInternal
-                    response = response_format.model_validate_json(verdict.choices[0].message.content)
-                except Exception as e:
-                    logging.error(f"[EVALUATOR] Validation error at index {idx}: {e} / message content: {verdict.choices[0].message.content}")
-                    logging.info(f"[EVALUATOR] Raw response: {verdict.choices[0].message.content}")
-                    
-                content = response.model_dump()
-                # logging.info(f"[EVALUATOR] Verdict: {content['verdict']}, Ground: {content['ground']}, Rationale: {content['rationale']}")
-                verdict_action = Action(
-                    agent="evaluator",
-                    action_type="respond",
-                    content=content
-                )
-                self.score_conflict(idx, verdict_action)
-            # breakpoint()
+        #print(messages_list[0])
+        #input()
+        logging.info(f"[EVALUATOR] Evaluating {len(messages_list)} user responses for consistency.")
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            verdicts = list(tqdm(executor.map(
+                lambda messages: self.generate_verdict(messages),
+                messages_list
+            )))
+        
+        for idx, verdict in zip(self.user_indices, verdicts):
+            self.env_cost += completion_cost(verdict)
+            try:
+                response = EvaluationResponse.model_validate_json(verdict.choices[0].message.content)
+            except Exception as e:
+                logging.error(f"[EVALUATOR] Validation error at index {idx}: {e}")
+                logging.info(f"[EVALUATOR] Raw response: {verdict.choices[0].message.content}")
+                
+            content = response.model_dump()
+            # logging.info(f"[EVALUATOR] Verdict: {content['verdict']}, Ground: {content['ground']}, Rationale: {content['rationale']}")
+            verdict_action = Action(
+                agent="evaluator",
+                action_type="respond",
+                content=content
+            )
+            self.score_conflict(idx, verdict_action)
+        # breakpoint()
         # inter-session consistency
-        # for each element pair/triplet/whatsoever in self.all_data.values() with same index across sessions, 
+        # for each element pair/triplet/whatsoever in all_data.values() with same index across sessions, 
         # i.e. get_to_knows[0] in session 1, get_to_knows[0] in session 2, get_to_knows[0] in session 3, ...
         if self.num_sessions > 1:
             inter_session_messages_list = []
@@ -289,9 +209,7 @@ class EvaluatorTestEnv:
                 })
 
             self.inter_session_score = round(sum(inter_session_scores) / len(inter_session_scores), 4) if len(inter_session_scores) > 0 else None
-        if "abstention_analysis" not in self.all_data :
-            self.abstention_eval()
-        logging.info(f"[EVALUATOR] Evaluation completed. (External Count : {self.external_count})")
+        
         return True
     
     
@@ -323,11 +241,7 @@ class EvaluatorTestEnv:
             "inter_session_score": {
                 "inter_session_score": self.inter_session_score,
                 "inter_session_results": self.inter_session_results
-            },
-            "abstention_analysis": {
-                "abstention_rate": self.abstention_rate,
-                "abstention_results": self.abstention_results
-            },
+            }
         }
             
         write_json(final_result, path)

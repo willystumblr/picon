@@ -162,6 +162,7 @@ class IntervieweeSimulator:
                     # still too long even after pruning – fallback
                     self.history = [self.history[0]] + self.history[-2:]
 
+            
             res = get_completion(
                 model=f"hosted_vllm/{self.vllm_model_alias}",
                 messages=self.history,

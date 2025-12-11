@@ -66,10 +66,11 @@ class EntityExtractorTestEnv:
 
         return self.state, False
         
-    def save_state(self, path: str, termination_status: str = "Successfully completed"):
+    def save_state(self, model_name:str, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result={
             "agents_info": "extractor_agent",
+            "model" : model_name,
             "source_data_path": self.interview_data_path,
             "total_cost": self.agent.cost + self.env_cost,
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
@@ -106,4 +107,4 @@ if __name__ == "__main__":
     done = False
     while not done:
         state, done = env.step()
-    env.save_state(f"data/prompt_engineering/entity_extractor/entity_extractor_{time.strftime('%Y%m%d_%H%M%S')}_{args.model.split('/')[-1]}_{args.interview_data_path.split('/')[-1].split('.')[0]}.json")
+    env.save_state(args.model, f"data/prompt_engineering/entity_extractor/entity_extractor_{time.strftime('%Y%m%d_%H%M%S')}_{args.model.split('/')[-1]}_{args.interview_data_path.split('/')[-1].split('.')[0]}.json")

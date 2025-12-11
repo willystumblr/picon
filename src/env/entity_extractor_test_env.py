@@ -25,7 +25,7 @@ class EntityExtractorTestEnv:
         self.start_time = time.time()
         self.env_cost = 0.0
         self.interview_data_path = interview_data_path
-        data = read_json(interview_data_path)
+        data = read_json(interview_data_path)['session_1']
         self.qa_pairs = [item['environment_observation'][0]['response'] for item in data['history'] if item['environment_observation'] and item['environment_observation'][0]['observation_type'] == 'interviewee_response']
 
     def reset(self):
@@ -42,13 +42,12 @@ class EntityExtractorTestEnv:
         logging.info(f"[TURN {self.state.current_turn}] Question: {question} | Answer: {answer}")
         # 3. Questioner formulates the next question
         # two scenarios: (1) from extractor directly (hence generating from interviewee's response directly), (2) from web search
-        if self.state.current_turn == 0:
-            message = f"The interviewee's cutoff date information {answer}." # the first question's answer is about the cutoff date
-        else:
-            message = f"Question:{question}\nResponse: {answer}"
+        message = f"Question:{question}\nResponse: {answer}"
         action = self.agent.act(message) ####### 여기 #######
-
-        logging.info(f"[ACTION] KG Agent: {action.action_type} - {action.content if action.content is not None else action.tool_call.tool_name}")
+        if action.action_type == "next_agent":
+            logging.info(f"Extractor did not find any entities or claims. Skipping to next agent.")
+        else:
+            logging.info(f"[ACTION] Entity Agent: {action.action_type} - {action.content if action.content is not None else action.tool_call.tool_name}")
         turn = Turn(
             type='main_interrogation',
             agent_action=[action],

@@ -26,6 +26,7 @@ class EntityExtractorTestEnv:
         self.env_cost = 0.0
         self.interview_data_path = interview_data_path
         data = read_json(interview_data_path)
+        data = data['session_1']
         self.qa_pairs = [item['environment_observation'][0]['response'] for item in data['history'] if item['environment_observation'] and item['environment_observation'][0]['observation_type'] == 'interviewee_response']
 
     def reset(self):
@@ -48,7 +49,6 @@ class EntityExtractorTestEnv:
             message = f"Question:{question}\nResponse: {answer}"
         action = self.agent.act(message) ####### 여기 #######
 
-        logging.info(f"[ACTION] KG Agent: {action.action_type} - {action.content if action.content is not None else action.tool_call.tool_name}")
         turn = Turn(
             type='main_interrogation',
             agent_action=[action],
@@ -70,7 +70,7 @@ class EntityExtractorTestEnv:
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result={
-            "agents_info": "kg_agent",
+            "agents_info": "entity_extraction_agent",
             "source_data_path": self.interview_data_path,
             "total_cost": self.agent.cost + self.env_cost,
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
@@ -78,8 +78,7 @@ class EntityExtractorTestEnv:
             "history": [obj.model_dump() for obj in self.state.history],
             "agent_memory": {
                 self.agent.role: self.agent.memory
-            },
-            "interviewee_kg": self.agent.kg
+            }
         }
         write_json(final_result, path)
         

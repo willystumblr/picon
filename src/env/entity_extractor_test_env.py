@@ -25,9 +25,8 @@ class EntityExtractorTestEnv:
         self.start_time = time.time()
         self.env_cost = 0.0
         self.interview_data_path = interview_data_path
-        data = read_json(interview_data_path)
-        data = data['session_1']
-        self.qa_pairs = [item['environment_observation'][0]['response'] for item in data['history'] if item['environment_observation'] and item['environment_observation'][0]['observation_type'] == 'interviewee_response']
+        data = read_json(interview_data_path)['session_1']
+        self.qa_pairs = [item['environment_observation'][0]['response'] for item in data['history'] if item['environment_observation'] and item['environment_observation'][0]['observation_type'] == 'interviewee_response' and item['type'] != 'repeat']
 
     def reset(self):
         """reset the environment"""
@@ -43,12 +42,12 @@ class EntityExtractorTestEnv:
         logging.info(f"[TURN {self.state.current_turn}] Question: {question} | Answer: {answer}")
         # 3. Questioner formulates the next question
         # two scenarios: (1) from extractor directly (hence generating from interviewee's response directly), (2) from web search
-        if self.state.current_turn == 0:
-            message = f"The interviewee's cutoff date information {answer}." # the first question's answer is about the cutoff date
-        else:
-            message = f"Question:{question}\nResponse: {answer}"
+        message = f"Question:{question}\nResponse: {answer}"
         action = self.agent.act(message) ####### 여기 #######
-
+        if action.action_type == "next_agent":
+            logging.info(f"Extractor did not find any entities or claims. Skipping to next agent.")
+        else:
+            logging.info(f"[ACTION] Entity Agent: {action.action_type} - {action.content if action.content is not None else action.tool_call.tool_name}")
         turn = Turn(
             type='main_interrogation',
             agent_action=[action],
@@ -70,7 +69,7 @@ class EntityExtractorTestEnv:
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result={
-            "agents_info": "entity_extraction_agent",
+            "agents_info": "extractor_agent",
             "source_data_path": self.interview_data_path,
             "total_cost": self.agent.cost + self.env_cost,
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
@@ -78,7 +77,7 @@ class EntityExtractorTestEnv:
             "history": [obj.model_dump() for obj in self.state.history],
             "agent_memory": {
                 self.agent.role: self.agent.memory
-            }
+            },
         }
         write_json(final_result, path)
         
@@ -107,4 +106,4 @@ if __name__ == "__main__":
     done = False
     while not done:
         state, done = env.step()
-    env.save_state(f"data/prompt_engineering/entity_extractor/entity_extractor_test_history_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    env.save_state(f"data/prompt_engineering/entity_extractor/entity_extractor_{time.strftime('%Y%m%d_%H%M%S')}_{args.model.split('/')[-1]}_{args.interview_data_path.split('/')[-1].split('.')[0]}.json")

@@ -21,7 +21,7 @@ from src.env.evaluator_test_env import EvaluatorTestEnv
 from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
-from src.utils import write_json
+from src.utils import write_json, upload_to_github 
 
 load_dotenv()
 
@@ -46,7 +46,7 @@ sessions: Dict[str, WebInterrogationEnv] = {}
 # Fixed parameters for human interview
 MODEL = "gpt-5"
 NHD_MODEL = "gpt-5"
-NUM_TURNS = 50
+NUM_TURNS = 40
 NUM_SESSIONS = 1
 
 # Request/Response models
@@ -64,6 +64,7 @@ class StartInterviewResponse(BaseModel):
 class RespondRequest(BaseModel):
     session_id: str
     response: str
+    is_confirmation: Optional[bool] = False
 
 class RespondResponse(BaseModel):
     next_question: Optional[str]
@@ -91,7 +92,7 @@ def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
     
     agents = {
         "questioner": get_agent("questioner", "src/agents/prompts/questioner.txt", model=MODEL),
-        "extractor": get_agent("claim_extractor", "src/agents/prompts/claim_extractor_prompt.txt", model=MODEL),
+        "extractor": get_agent("entity_extractor", "src/agents/prompts/entity_extractor.txt", model=MODEL),
         "web_search": get_agent("web_search", "src/agents/prompts/websearch_prompt.txt", model=MODEL),
         "evaluator": get_agent("evaluator", "src/agents/prompts/evaluator_prompt.txt", model=MODEL),
     }
@@ -150,7 +151,7 @@ async def submit_response(request: RespondRequest):
         env = sessions[request.session_id]
         
         # Process response and get next question
-        result = env.process_response(request.response)
+        result = env.process_response(request.response, is_confirmation=request.is_confirmation)
         
         return RespondResponse(
             next_question=result.get("next_question"),
@@ -168,8 +169,9 @@ async def submit_response(request: RespondRequest):
 async def get_results(session_id: str):
     """Get the final results for a completed interview."""
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found. It may have already been processed.")
     
+    env = None
     try:
         env = sessions[session_id]
         
@@ -177,15 +179,18 @@ async def get_results(session_id: str):
             raise HTTPException(status_code=400, detail="Interview not yet complete")
         
         # Run evaluation
+        logger.info(f"[{session_id}] Starting save_state...")
         results = env.save_state()
         
         # Run evaluator
+        logger.info(f"[{session_id}] Starting evaluator...")
         evaluator_env = EvaluatorTestEnv(
             model=MODEL,
             interview_path={"session_1": results}
         )
         evaluator_env.reset()
         evaluator_env.step()
+        logger.info(f"[{session_id}] Evaluator completed.")
         
         # Add evaluation results
         results["external_consistency"] = {
@@ -193,27 +198,46 @@ async def get_results(session_id: str):
             "conflict_count": evaluator_env.external_conflict,
             "plausible_count": evaluator_env.external_plausible,
             "consistency_rate": (evaluator_env.external_plausible / evaluator_env.external_count) if evaluator_env.external_count > 0 else None,
+            "conflict_verdicts": evaluator_env.external_conflict_verdicts
         }
         results["internal_consistency"] = {
             "total_evaluations": evaluator_env.internal_count,
             "conflict_count": evaluator_env.internal_conflict,
             "plausible_count": evaluator_env.internal_plausible,
             "consistency_rate": (evaluator_env.internal_plausible / evaluator_env.internal_count) if evaluator_env.internal_count > 0 else None,
+            "conflict_verdicts": evaluator_env.internal_conflict_verdicts
         }
+        results["abstention_eval"] = {
+            "abstention_rate": evaluator_env.abstention_rate,
+            "abstention_results": evaluator_env.abstention_results
+        }
+        results["eval_cost"] = evaluator_env.env_cost
         
-        # Save to file
-        result_path = f"data/results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-        write_json(results, result_path)
+        # Save to file - do this BEFORE preparing response
+        result_path = f"interview_results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+        logger.info(f"[{session_id}] Uploading to GitHub: {result_path}")
+        upload_to_github(result_path, results)
+        logger.info(f"[{session_id}] Upload successful.")
         
-        # Clean up session
+        # Prepare response BEFORE deleting session
+        response = ResultsResponse(session_id=session_id, results=results)
+        
+        # Clean up session only after response is prepared
         del sessions[session_id]
+        logger.info(f"[{session_id}] Session cleaned up, returning response.")
         
-        return ResultsResponse(session_id=session_id, results=results)
+        return response
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error getting results: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"[{session_id}] Error getting results: {e}")
+        # If upload succeeded but we failed later, still try to clean up
+        if session_id in sessions:
+            try:
+                del sessions[session_id]
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Error processing results: {str(e)}")
 
 
 @app.delete("/api/session/{session_id}")
@@ -224,8 +248,9 @@ async def cancel_session(session_id: str):
         # Save partial results
         try:
             results = env.save_state(termination_status="Cancelled by user")
-            result_path = f"data/results/human_interview/{env.interviewee.name.replace(' ', '_')}_cancelled_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-            write_json(results, result_path)
+            result_path = f"interview_results/human_interview/temp/{env.interviewee.name.replace(' ', '_')}_cancelled_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+            # write_json(results, result_path)
+            upload_to_github(result_path, results)
         except Exception as e:
             logger.warning(f"Could not save partial results: {e}")
         del sessions[session_id]

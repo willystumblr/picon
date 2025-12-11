@@ -17,7 +17,8 @@ class EvaluatorAgent(Agent):
         super().__init__(
             role=kwargs.get('role', "evaluator"),
             system_message=kwargs.get('system_message', ""),
-            model=kwargs.get('model', "gemini/gemini-2.5-flash")
+            model=kwargs.get('model', "gemini/gemini-2.5-flash"),
+            port=kwargs.get('port', None)
         )
 
     def set_cutoff_date(self, cutoff_date: str) -> None:
@@ -41,12 +42,17 @@ class EvaluatorAgent(Agent):
             rationale: str  # explanation for the verdict
             ground: Literal['internal', 'external'] = Field(description="Ground for the verdict. If `internal`, the verdict is based on the internal context (i.e., the conversation history without external information). If `external`, it is based on external web search results.")
         
-        res = get_completion(
+        completion_kwargs = dict(
             model=self.model,
             messages=self.memory,
             reasoning_effort="low",
             response_format=EvaluationResponse
         )
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+        
+        res = get_completion(**completion_kwargs)   
         self._calculate_cost(res)
         # logging.info(f"[REASONING TRACE] {self.role} {res.choices[0].message.reasoning_content}")
         res_eval = EvaluationResponse.model_validate_json(res.choices[0].message.content)  # validate response format

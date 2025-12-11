@@ -9,6 +9,7 @@ from litellm import completion
 from google import genai
 from google.genai import types
 from openai import OpenAI
+from github import Github
 
 def read_json(file_path: str) -> Any:
     with open(file_path, "r") as f:
@@ -323,3 +324,54 @@ def get_user_input_with_timeout(timeout: int) -> str:
         return user_input
     else:
         return ''  # No input within the timeout period
+    
+def upload_to_github(filepath, content):
+    if not isinstance(content, str):
+        content = json.dumps(content, indent=4, ensure_ascii=False)
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        logging.error("GITHUB_TOKEN environment variable is not set!")
+        raise ValueError("GITHUB_TOKEN not configured")
+    
+    logging.info(f"Attempting GitHub upload with token: {token[:8]}...{token[-4:] if len(token) > 12 else ''}")
+    
+    g = Github(token)
+    repo = g.get_repo("sujeongim/real_human_interview")
+    try:
+        # results 폴더에 저장
+        if not filename.endswith('.json'):
+            filename += '.json'
+        
+        # 파일이 이미 존재하는지 확인
+        contents = None
+        try:
+            contents = repo.get_contents(filepath, ref="main")
+        except Exception:
+            pass  # 파일이 없으면 예외 발생 → create_file로 진행
+
+        if contents is None:
+            # 파일이 없으면 새로 생성
+            repo.create_file(filepath, "Add new interview result", content, branch="main")
+            logging.info(f"File created successfully at {filepath}!")
+        else:
+            # 파일이 있으면 업데이트(덮어쓰기)
+            repo.update_file(filepath, "Update interview result", content, contents.sha, branch="main")
+            logging.info(f"File updated successfully at {filepath}!")
+    except Exception as e:
+        logging.error(f"An error occurred while uploading {filename}: {e}", exc_info=True)
+        raise  # Re-raise the exception so caller knows upload failed
+        
+def download_from_github(filepath):
+    g = Github(os.getenv("GITHUB_TOKEN"))
+    repo = g.get_repo("sujeongim/real_human_interview")
+    try:
+        # .json 확장자 자동 추가
+        if not filepath.endswith('.json'):
+            filepath += '.json'
+        contents = repo.get_contents(filepath, ref="main")
+        file_data = contents.decoded_content.decode('utf-8')
+        print(f"File {filepath} downloaded successfully!")
+        return file_data
+    except Exception as e:
+        print(f"An error occurred while downloading {filepath}: {e}")
+        return None

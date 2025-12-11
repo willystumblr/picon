@@ -38,6 +38,7 @@ export default function InterviewPage() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -102,6 +103,7 @@ export default function InterviewPage() {
         body: JSON.stringify({
           session_id: sessionData.sessionId,
           response: userMessage,
+          is_confirmation: isAwaitingConfirmation,
         }),
       });
 
@@ -114,30 +116,81 @@ export default function InterviewPage() {
 
       if (data.is_complete) {
         setIsComplete(true);
+        setIsAwaitingConfirmation(false);
         setMessages((prev) => [
           ...prev,
           {
             id: 'complete',
             type: 'system',
-            content: '🎉 Thank you for completing the interview! Your responses have been recorded.',
+            content: '🎉 Thank you for completing the interview! Please wait while we evaluate your responses. This may take 1-2 minutes...',
             timestamp: new Date(),
           },
         ]);
-      } else if (data.next_question) {
-        // Add confirmation question if present
-        if (data.confirmation_question) {
+        
+        // Save results to backend - this can take 1-2 minutes for evaluation
+        try {
+          // Use AbortController with a longer timeout (3 minutes)
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
+          
+          const resultsResponse = await fetch(`/api/results/${sessionData.sessionId}`, {
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          
+          if (resultsResponse.ok) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: 'saved',
+                type: 'system',
+                content: '✅ Your responses have been saved and evaluated successfully. You may now close this page.',
+                timestamp: new Date(),
+              },
+            ]);
+          } else {
+            const errorData = await resultsResponse.json().catch(() => ({}));
+            console.error('Failed to save results:', errorData);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: 'save-error',
+                type: 'system',
+                content: '⚠️ There was an issue saving your responses. Please contact the administrator.',
+                timestamp: new Date(),
+              },
+            ]);
+          }
+        } catch (saveErr) {
+          console.error('Error saving results:', saveErr);
+          const errorMessage = saveErr instanceof Error && saveErr.name === 'AbortError'
+            ? '⏱️ The evaluation is taking longer than expected. Your responses may still be saved. Please contact the administrator if you do not receive confirmation.'
+            : '⚠️ There was an issue saving your responses. Please contact the administrator.';
           setMessages((prev) => [
             ...prev,
             {
-              id: `confirm-${Date.now()}`,
+              id: 'save-error',
               type: 'system',
-              content: data.confirmation_question,
+              content: errorMessage,
               timestamp: new Date(),
             },
           ]);
         }
-
-        // Add next question
+      } else if (data.confirmation_question && !data.next_question) {
+        // Only confirmation question returned - user needs to respond to it first
+        setIsAwaitingConfirmation(true);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `q-${Date.now()}`,
+            type: 'system',
+            content: data.confirmation_question,
+            timestamp: new Date(),
+          },
+        ]);
+      } else if (data.next_question) {
+        // Regular next question (confirmation already handled or no confirmation)
+        setIsAwaitingConfirmation(false);
         setMessages((prev) => [
           ...prev,
           {
@@ -284,7 +337,7 @@ export default function InterviewPage() {
         <div className="bg-green-50 border-t border-green-200 px-4 py-4 text-center">
           <p className="text-green-700 font-medium">Interview Complete! 🎉</p>
           <p className="text-sm text-green-600 mt-1">
-            Thank you for your participation. You may now close this window.
+            Thank you for your participation. Evaluation may take 1-2 minutes. Please do not close this page until you see a confirmation message.
           </p>
         </div>
       )}

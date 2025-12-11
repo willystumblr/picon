@@ -27,7 +27,6 @@ Do not output any additional explanation or text."""
 class InterrogationEnv:
     def __init__(
         self, 
-        model, 
         agents: Dict[str, Agent] = {},
         baseline_name: str = "characterai",
         tools: List[Dict[str, Any]] = [],
@@ -42,14 +41,13 @@ class InterrogationEnv:
         local_rng = random.Random(seed)
         
         self.tools = tools
-        self.model = model
         if not agents:
             logging.warning("No agents provided. Initializing default agents.")
             agents = {
-                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=model),
-                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
-                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=model),
-                "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=model),
+                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model='gemini/gemini-2.5-flash', port=None),
+                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt") if kwargs.get('use_claim_extractor', True) else get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model='gemini/gemini-2.5-flash', port=None),
+                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model='gemini/gemini-2.5-flash', port=None),
+                "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model='gemini/gemini-2.5-flash', port=None),
             }
         self.agents = agents
         if 'web_search' in self.agents and not self.tools:
@@ -218,12 +216,16 @@ class InterrogationEnv:
                         },
                     ]
                     messages.extend(sub_message)
-                    res = get_completion(
-                        model=self.model,
+                    completion_kwargs = dict(
+                        model=self.agents['questioner'].model,
                         messages=messages,
                         reasoning_effort="low",
                     )
-                    self.env_cost += completion_cost(res)
+                    if self.agents['questioner'].model.startswith("hosted_vllm/"):
+                        assert self.agents['questioner'].port is not None, "Port must be specified for hosted_vllm models."    
+                        completion_kwargs['api_base'] = f"http://localhost:{self.agents['questioner'].port}/v1"
+                    res = get_completion(**completion_kwargs)
+                    self.env_cost += completion_cost(res) if not self.agents['questioner'].model.startswith("hosted_vllm/") else 0.0
                     confirmation_question = res.choices[0].message.content.strip()
                     if "SKIP" not in confirmation_question:
                         logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
@@ -294,15 +296,19 @@ class InterrogationEnv:
             
             inital_response = self.state.history[i].environment_observation[0].response.content
             while True:
-                res = get_completion(
-                    model=self.model,
+                completion_kwargs = dict(
+                    model=self.agents['evaluator'].model,
                     messages=[
                         {"role": "system", "content": REPEAT_PROMPT},
                         {"role": "user", "content": f"Question: {q['question']}\n\nResponse 1: {inital_response}\nResponse 2: {response.content}"}
                     ],
                     reasoning_effort="low",
                 )
-                self.env_cost += completion_cost(res)
+                if self.agents['evaluator'].model.startswith("hosted_vllm/"):
+                    assert self.agents['evaluator'].port is not None, "Port must be specified for hosted_vllm models."    
+                    completion_kwargs['api_base'] = f"http://localhost:{self.agents['evaluator'].port}/v1"
+                res = get_completion(**completion_kwargs)
+                self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
                 judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
                 if judge in ["TRUE", "FALSE"]:
                     break

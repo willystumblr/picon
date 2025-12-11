@@ -38,6 +38,7 @@ class EvaluatorTestEnv:
         project_root = os.path.dirname(os.path.dirname(current_dir))
         # self.agent = get_agent("evaluator", model=model, system_message_path=f"{project_root}/src/env/evaluator_prompt.txt")
         self.model = model
+        self.port = kwargs.get('port', None)
         self.start_time = time.time()
         self.env_cost = 0.0
         self.interview_path = interview_path
@@ -68,8 +69,12 @@ class EvaluatorTestEnv:
         self.all_verdicts = []
         
         self.inter_session_data = {}
-        self.abstention_rate = 0.0
-        self.abstention_results = []
+        for session_id, d in all_data.items():
+            if not session_id.startswith('session_'):
+                continue
+            get_to_knows = [turn["environment_observation"][0]['response'] for turn in d['history'] if turn['type'] == "get_to_know"]
+            self.inter_session_data[session_id] = get_to_knows
+        # gather each question-response pair across sessions
         self.inter_session_results = []
         self.inter_session_score = None
 
@@ -152,46 +157,64 @@ class EvaluatorTestEnv:
             response_format = EvaluationResponseExternal
             ground = "external"
         else:
-            response_format = EvaluationResponseInternal
-            ground = "internal"
-            
-        verdict = get_completion(
+            ground = 'internal'
+        completion_kwargs = dict(
             model=self.model,
             #messages=messages[:-1] + [{'role' : messages[-1]['role'] , 'content': messages[-1]['content'] + f"[conflict type] ground: {ground}"}], 
             messages=messages,
             temperature=1.0,
             response_format=response_format
         )
-        self.env_cost += completion_cost(verdict)
-        return verdict, response_format
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"    
+        verdict = get_completion(**completion_kwargs)
+        self.env_cost += completion_cost(verdict) if not self.model.startswith("hosted_vllm/") else 0.0
+        return verdict
     
     def abstention_eval(self):
-        #qa_pairs = [turn['environment_observation'][0]['response'] for turn in self.history if turn['environment_observation'][0]['observation_type']=="interviewee_response" and turn['type']!="repeat"]
-
+        evaluator_mem = self.evaluator_history
+        user_resp = [(i, item) for i, item in enumerate(evaluator_mem) if item['role']=='user']
+        qa_pairs = []
+        for idx, user_item in user_resp:
+            assistant_question = evaluator_mem[idx-1]['content']
+            user_answer = user_item['content']
+            qa_pairs.append({
+                "question": assistant_question,
+                "content": user_answer
+            })
         class OutputSchema(BaseModel):
             abstain: Literal['true', 'partially true', 'false'] = Field(..., description="Whether the provided response is abstaining from answering the question.")
             reason : str = Field(..., description="A brief explanation for the abstention decision.")
             abstain_type: Literal['none', 'refusal', 'lack info', 'asking back', 'unrelated'] = Field(..., description="The type of abstention (e.g., 'lack info', 'unknown', etc.).")
 
-        logging.info(f"Evaluating {len(self.qa_pairs)} QA pairs...")
-        with ThreadPoolExecutor(max_workers=16) as executor: # tqdm progress bar
-            results = list(tqdm(executor.map(
-                lambda qa: get_completion(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": self.abstention_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Question: {qa['question']}\nAnswer: {qa['content']}"
-                        }
-                    ],
-                    response_format=OutputSchema,
-                ), self.qa_pairs), total=len(self.qa_pairs), desc="Evaluating QA pairs")
+        logging.info(f"Evaluating {len(qa_pairs)} QA pairs...")
+        completion_kwargs_list = []
+        for qa in qa_pairs:
+            completion_kwargs = dict(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": self.abstention_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {qa['question']}\nAnswer: {qa['content']}"
+                    }
+                ],
+                response_format=OutputSchema,
             )
-        self.env_cost += sum(completion_cost(res) for res in results)
+            if self.model.startswith("hosted_vllm/"):
+                assert self.port is not None, "Port must be specified for hosted_vllm models."    
+                completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+            completion_kwargs_list.append(completion_kwargs)
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            results = list(tqdm(executor.map(
+                lambda kwargs: get_completion(**kwargs),
+                completion_kwargs_list
+            ), total=len(qa_pairs), desc="Evaluating QA pairs"))
+        self.env_cost += sum(completion_cost(res) for res in results) if not self.model.startswith("hosted_vllm/") else 0.0
         logging.info("Evaluation completed.")
     
         outputs = [OutputSchema.model_validate_json(res.choices[0].message.content) if res.choices[0].message.content else None for res in results]
@@ -268,18 +291,24 @@ class EvaluatorTestEnv:
                         "content": content
                     }
                 ])
-            # breakpoint()
+            completion_kwargs_list = []
+            for messages in inter_session_messages_list:
+                completion_kwargs = dict(
+                    model=self.model,
+                    messages=messages,
+                )            
+                if self.model.startswith("hosted_vllm/"):
+                    assert self.port is not None, "Port must be specified for hosted_vllm models."    
+                    completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"    
+                completion_kwargs_list.append(completion_kwargs)
             with ThreadPoolExecutor(max_workers=8) as executor:
                 inter_session_verdicts = list(tqdm(executor.map(
-                    lambda messages: get_completion(
-                        model=self.model,
-                        messages=messages,
-                    ),
-                    inter_session_messages_list
-                )))
+                    lambda kwargs: get_completion(**kwargs),
+                    completion_kwargs_list
+                ), total=len(completion_kwargs_list), desc="Inter-session consistency evaluation"))
             inter_session_scores = []
             for i, verdict in enumerate(inter_session_verdicts):
-                self.env_cost += completion_cost(verdict)
+                self.env_cost += completion_cost(verdict) if not self.model.startswith("hosted_vllm/") else 0.0
                 judge = verdict.choices[0].message.content.strip() if verdict and verdict.choices and verdict.choices[0].message and verdict.choices[0].message.content else None
                 inter_session_scores.append(judge == "TRUE")
                 self.inter_session_results.append({
@@ -355,7 +384,8 @@ if __name__ == "__main__":
 
     env = EvaluatorTestEnv(
         model=args.model,
-        interview_path=args.interview_path
+        interview_path=args.interview_path,
+        port=8888
     )
     state = env.reset()
     env.step()

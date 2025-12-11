@@ -17,3 +17,4 @@ cloudscraper
 markdownify
 requests
 rank-bm25
+PyGithub

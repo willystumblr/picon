@@ -16,27 +16,37 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
+    # Model selection
     parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview'])
-    parser.add_argument('--model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the interrogation.')
-    parser.add_argument('--vllm_model_alias', type=str, help='Alias for the vLLM model.')
-    parser.add_argument('--port', type=int, default=8000, help='Port number for the server.')
-    parser.add_argument('--nhd_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the NHD detector in the interviewee simulator.')
-    parser.add_argument('--hs_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the Human Simulacra interviewee simulator.')
+    parser.add_argument('--questioner_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the questioner.')
+    parser.add_argument('--extractor_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the extractor.')
+    parser.add_argument('--web_search_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the web search agent.')
+    parser.add_argument('--evaluator_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the evaluator.')
+    parser.add_argument('--simulator_model', type=str, help='Simulator model name (opencharacter & consistent_llm).')
+    parser.add_argument('--nhd_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the NH detector in the interviewee simulator.')
+    # Port settings
+    parser.add_argument('--questioner_port', type=int, default=None, help='Port number for the questioner agent server.')
+    parser.add_argument('--extractor_port', type=int, default=None, help='Port number for the extractor agent server.')
+    parser.add_argument('--web_search_port', type=int, default=None, help='Port number for the web search agent server.')
+    parser.add_argument('--evaluator_port', type=int, default=None, help='Port number for the evaluator agent server.')
+    parser.add_argument('--simulator_port', type=int, default=None, help='Port number for the persona simulator.')
+    parser.add_argument('--nhd_port', type=int, default=None, help='Port number for the NH detector in the interviewee simulator.')
+    # Other configurations
     parser.add_argument('--num_turns', type=int, default=30, help='Maximum number of turns in the interrogation.')
+    parser.add_argument('--num_sessions', type=int, default=2, help='Number of interrogation sessions to run per interviewee.')
     parser.add_argument('--max_workers', type=int, default=5, help='Maximum number of workers for the interrogation.')
-    parser.add_argument('--sample', action='store_true', help='Whether to sample OpenCharacter personas.')
+    parser.add_argument('--do_sample', action='store_true', help='Whether to sample OpenCharacter personas.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for sampling personas.')
     parser.add_argument('--question_seed', type=int, default=42, help='Random seed for pre-defined questions\' order.')
     parser.add_argument('--log_to_file', action='store_true', help='Whether to log to a file.')
+    # Input and output paths
     parser.add_argument('--questioner_prompt_path', type=str, default='src/agents/prompts/questioner.txt', help='Path to the questioner agent prompt file.')
     parser.add_argument('--entity_extractor_prompt_path', type=str, default='src/agents/prompts/entity_extractor.txt', help='Path to the entity extractor agent prompt file.')
     parser.add_argument('--claim_extractor_prompt_path', type=str, default='src/agents/prompts/claim_extractor_prompt.txt', help='Path to the claim extractor agent prompt file.')
     parser.add_argument('--web_search_prompt_path', type=str, default='src/agents/prompts/websearch_prompt.txt', help='Path to the web search agent prompt file.')
     parser.add_argument('--evaluator_prompt_path', type=str, default='src/agents/prompts/evaluator_prompt.txt', help='Path to the evaluator agent prompt file.')
-    parser.add_argument('--use_claim_extractor', action='store_true', help='Whether to use the claim extractor agent instead of the entity extractor agent.')
     parser.add_argument('--output_dir', type=str, default='data/results', help='Directory to save the results.')
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
-    parser.add_argument('--num_sessions', type=int, default=2, help='Number of interrogation sessions to run per interviewee.')
     
     return parser.parse_args()
 
@@ -71,12 +81,11 @@ def main(args, interviewee_kwarg):
             "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
         }
         env = InterrogationEnv(
-            model=args.model,
             agents = {
-                "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.model),
-                "extractor": get_agent("claim_extractor", args.claim_extractor_prompt_path, model=args.model) if args.use_claim_extractor else get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.model),
-                "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.model),
-                "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.model),
+                "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.questioner_model, port=args.questioner_port),
+                "extractor": get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.extractor_model, port=args.extractor_port),
+                "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.web_search_model, port=args.web_search_port),
+                "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.evaluator_model, port=args.evaluator_port),
             },
             tools=tools,
             max_turns=args.num_turns,
@@ -93,8 +102,9 @@ def main(args, interviewee_kwarg):
     write_json(results_complete, result_path)
     logging.info("Starting evaluation with EvaluatorTestEnv...")
     evaluator_env = EvaluatorTestEnv(
-        model=args.model,
-        interview_path=results_complete
+        model=args.evaluator_model,
+        interview_path=results_complete,
+        port=args.evaluator_port
     )
     evaluator_env.reset()
     evaluator_env.step()
@@ -146,19 +156,21 @@ if __name__ == "__main__":
                 "user_id": os.getenv('CAI_API_KEY'), #args.user_id,
                 "name": persona['character_name'],
                 "nhd_model": args.nhd_model,
-                "question_seed": args.question_seed
+                "question_seed": args.question_seed,
+                "nhd_port": args.nhd_port,
             })    
     elif args.baseline_name == "human_simulacra":
         interviewee_kwargs = [{
             "baseline_name": "human_simulacra",
             "name": name,            
             "nhd_model": args.nhd_model,
-            "hs_model": args.hs_model,
-            "question_seed": args.question_seed
+            "simulator_model": args.simulator_model,
+            "question_seed": args.question_seed,
+            "nhd_port": args.nhd_port,
         } for name in ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami Clark", "Michael Miller", "Kevin Kelly", "Erica Walker", "Leslie Nichols", "Robert Scott", "Marsh Zhaleh"]]
     elif args.baseline_name == "opencharacter":
         dataset = load_dataset("xywang1/OpenCharacter", "Synthetic-Character", split="train")
-        if args.sample:
+        if args.do_sample:
             dataset = dataset.shuffle(seed=args.seed).select(range(10))
         for data in dataset:
             name_match = re.match(r"Name:\s(.*)\n",  data['character'])
@@ -174,8 +186,9 @@ if __name__ == "__main__":
                 "load_in_4bit": True,
                 "nhd_model": args.nhd_model,
                 "question_seed": args.question_seed,
-                "vllm_model_alias": args.vllm_model_alias,
-                "port": args.port
+                "simulator_model": args.simulator_model,
+                "port": args.simulator_port,
+                "nhd_port": args.nhd_port,
             })
     elif args.baseline_name == "consistent_llm":
         dataset = read_jsonl("src/env/personas/consistent_llm_personas.jsonl")
@@ -192,8 +205,9 @@ if __name__ == "__main__":
                 "counterpart_name": data['counterpart_name'],
                 "instruction": data['instruction'],
                 "nhd_model": args.nhd_model,
+                "nhd_port": args.nhd_port,
                 "question_seed": args.question_seed,
-                "vllm_model_alias": args.vllm_model_alias,
+                "simulator_model": args.simulator_model,
                 "port": args.port
             })
     elif args.baseline_name == "human_interview":
@@ -201,6 +215,7 @@ if __name__ == "__main__":
             "baseline_name": "human_interview",
             "name": input("Enter your name: "),
             "nhd_model": args.nhd_model,
+            "nhd_port": args.nhd_port,
             "question_seed": args.question_seed
         }]
     else:

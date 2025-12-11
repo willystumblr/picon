@@ -17,7 +17,8 @@ class ExtractorAgent(Agent):
         super().__init__(
             role=kwargs.get('role', "extractor"),
             system_message=kwargs.get('system_message', ""),
-            model=kwargs.get('model', "gemini/gemini-2.5-flash")
+            model=kwargs.get('model', "gemini/gemini-2.5-flash"),
+            port=kwargs.get('port', None)
         )
     
     def act(self, message: str) -> Action:
@@ -31,11 +32,17 @@ class ExtractorAgent(Agent):
         self.memory.append({"role": "user", "content": message})
         for attempt in range(3):
             try:
-                res = get_completion(
+                completion_kwargs = dict(
                     model=self.model,
                     messages=self.memory,
                     temperature=0.0 if not self.model.startswith("gpt") else 1.0,
                     response_format=EntityClaim,
+                )
+                if self.model.startswith("hosted_vllm/"):
+                    assert self.port is not None, "Port must be specified for hosted_vllm models."
+                    completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+                res = get_completion(
+                    **completion_kwargs
                 )
                 self._calculate_cost(res)
                 res_ext = EntityClaim.model_validate_json(res.choices[0].message.content)  # validate response format

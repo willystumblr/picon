@@ -13,6 +13,7 @@ from litellm.cost_calculator import completion_cost
 from concurrent.futures import ThreadPoolExecutor
 import random
 import os
+import uuid
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
@@ -57,7 +58,7 @@ class WebInterrogationEnv:
             logging.warning("No agents provided. Initializing default agents.")
             agents = {
                 "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=model),
-                "extractor": get_agent("claim_extractor", f"{project_root}/src/agents/prompts/claim_extractor_prompt.txt", model=model),
+                "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
                 "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=model),
                 "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=model),
             }
@@ -68,7 +69,7 @@ class WebInterrogationEnv:
         
         # Create a minimal interviewee object (just holds name, no input() calls)
         self.interviewee = WebInterviewee(
-            name=kwargs.get('name', 'Anonymous'),
+            name=str(uuid.uuid4())[:8],
             nhd_model=kwargs.get('nhd_model', 'gpt-5')
         )
         
@@ -99,7 +100,8 @@ class WebInterrogationEnv:
         
         # Pending question (waiting for response)
         self.pending_question: Optional[str] = None
-        self.pending_confirmation: Optional[str] = None
+        self.pending_confirmations: List[str] = []  # Queue of confirmation questions
+        self._last_confirmation_question: Optional[str] = None
         
     def get_progress(self) -> dict:
         """Get current progress information."""
@@ -146,10 +148,14 @@ class WebInterrogationEnv:
         
         return self.instruction, first_question
     
-    def process_response(self, response: str) -> dict:
+    def process_response(self, response: str, is_confirmation: bool = False) -> dict:
         """
         Process user response and return the next question or completion status.
         Returns dict with: next_question, phase, progress, is_complete, confirmation_question
+        
+        Args:
+            response: The user's response text
+            is_confirmation: If True, this response is for a confirmation question
         """
         if self.is_complete:
             return {
@@ -158,6 +164,10 @@ class WebInterrogationEnv:
                 "progress": self.get_progress(),
                 "is_complete": True
             }
+        
+        # Handle confirmation question response
+        if is_confirmation:
+            return self._handle_confirmation_response(response)
         
         # Handle response based on current phase
         if self.current_phase == self.PHASE_PREDEFINED:
@@ -168,6 +178,59 @@ class WebInterrogationEnv:
             return self._handle_repeat_response(response)
         else:
             raise ValueError(f"Invalid phase: {self.current_phase}")
+    
+    def _handle_confirmation_response(self, response: str) -> dict:
+        """Handle response to a confirmation question."""
+        # The confirmation question was already stored, we need to get it
+        # For now, we'll track the last confirmation question asked
+        confirmation_question = getattr(self, '_last_confirmation_question', "confirmation question")
+        
+        logging.info(f"[CONFIRMATION RESPONSE] {self.interviewee.name}: {response}")
+        
+        # Update agent memories with confirmation Q&A
+        self.agents['evaluator'].update_memory(role="assistant", content=confirmation_question)
+        self.agents['evaluator'].update_memory(role="user", content=response)
+        self.agents['questioner'].update_memory(role="assistant", content=confirmation_question)
+        self.agents['questioner'].update_memory(role="user", content=response)
+        
+        # Add confirmation response to the last turn's observations
+        if self.state.history:
+            confirmation_response = self._create_interviewee_response(confirmation_question, response)
+            self.state.history[-1].environment_observation.append(
+                Observation(observation_type="interviewee_response", response=confirmation_response)
+            )
+        
+        # Check if there are more pending confirmation questions
+        if self.pending_confirmations:
+            next_confirmation = self.pending_confirmations.pop(0)
+            self._last_confirmation_question = next_confirmation
+            return {
+                "next_question": None,
+                "confirmation_question": next_confirmation,
+                "phase": self.current_phase,
+                "progress": self.get_progress(),
+                "is_complete": False
+            }
+        
+        # No more confirmations - continue with next question based on current phase
+        if self.current_phase == self.PHASE_PREDEFINED:
+            if self.predefined_index >= len(self.predefined_questions):
+                self.current_phase = self.PHASE_MAIN
+                self.main_turn_count = 0
+                return self._generate_main_question()
+            else:
+                next_q = self.predefined_questions[self.predefined_index]['question']
+                self.pending_question = next_q
+                return {
+                    "next_question": next_q,
+                    "phase": self.current_phase,
+                    "progress": self.get_progress(),
+                    "is_complete": False
+                }
+        elif self.current_phase == self.PHASE_MAIN:
+            return self._generate_main_question()
+        else:
+            return self._generate_repeat_question()
     
     def _create_interviewee_response(self, question: str, response: str) -> IntervieweeResponse:
         """Create an IntervieweeResponse object."""
@@ -216,6 +279,18 @@ class WebInterrogationEnv:
         
         # Move to next predefined question or switch to main phase
         self.predefined_index += 1
+        
+        # Check if there are pending confirmation questions
+        if self.pending_confirmations:
+            confirmation_q = self.pending_confirmations.pop(0)
+            self._last_confirmation_question = confirmation_q
+            return {
+                "next_question": None,
+                "confirmation_question": confirmation_q,
+                "phase": self.current_phase,
+                "progress": self.get_progress(),
+                "is_complete": False
+            }
         
         if self.predefined_index >= len(self.predefined_questions):
             # Switch to main interrogation phase
@@ -290,6 +365,18 @@ class WebInterrogationEnv:
             environment_observation=observations
         )
         self.state.history.append(turn)
+        
+        # Check if there are pending confirmation questions
+        if self.pending_confirmations:
+            confirmation_q = self.pending_confirmations.pop(0)
+            self._last_confirmation_question = confirmation_q
+            return {
+                "next_question": None,
+                "confirmation_question": confirmation_q,
+                "phase": self.current_phase,
+                "progress": self.get_progress(),
+                "is_complete": False
+            }
         
         # Generate next question
         return self._generate_main_question()
@@ -425,8 +512,38 @@ class WebInterrogationEnv:
                         }
                     ]
                     
+                    """tool call 결과를 evaluator 메모리에 추가"""
                     self.agents['evaluator'].update_memory(**sub_message[1])
                     self.agents['evaluator'].update_memory(**sub_message[2])
+                    
+                    # Generate confirmation question
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Ask a short, concise \"affirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
+                                "Assume that no further search is available beyond the provided search results. "
+                                "If the tool `google_claim_search`'s search results are lacks all components ('title', 'link', and 'text_block') due to search failure or error, respond with a single word 'SKIP' (only one time) to indicate that no confirmation question can be generated (without explanation). "
+                                "If search results are available but 'text_block is incomplete or insufficient to form a meaningful question, use only the available information (either 'title' or 'link') to form your question. "
+                                "Generate either 'SKIP' or a single question without any additional explanation. "
+                            )
+                        },
+                    ]
+                    messages.extend(sub_message)
+                    res = get_completion(
+                        model=self.model,
+                        messages=messages,
+                        reasoning_effort="low",
+                    )
+                    self.env_cost += completion_cost(res)
+                    confirmation_question = res.choices[0].message.content.strip()
+                    
+                    if "SKIP" not in confirmation_question:
+                        logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
+                        # Add confirmation question to queue for web interface to handle
+                        self.pending_confirmations.append(confirmation_question)
+                    else:
+                        logging.info("Confirmation question skipped as per web search agent's decision.")
             
             return next_action, observations, filtered_actions
         

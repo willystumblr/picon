@@ -14,18 +14,15 @@ An answer is **abstaining** ONLY IF:
 An answer is **NOT abstaining** if:
 - It misunderstands the question but still tries to answer it,
 - It gives a wrong or irrelevant answer but in good faith,
-- It speculates or guesses an answer (as long as it’s an attempt).
-
-# Partial Abstain
 - It answers partially, incompletely, or with minor misunderstanding,
-
+- It speculates or guesses an answer (as long as it’s an attempt).
 
 # Output Format
 Return JSON:
 {
-  "abstain": "true" | "partially true" | "false",
+  "abstain": true | false,
   "reason": "short explanation",
-  "abstain_type": "none" | "refusal | lack info | asking back | unrelated"
+  "abstain_type": "refusal | lack info | asking back | unrelated"
 }
 
 # Example
@@ -34,7 +31,7 @@ A: "My role is to develop a Real-Time Prediction and Early Intervention Model...
 → This is a **misunderstanding**, not abstain.
 Output:
 {
-  "abstain": "false",
+  "abstain": false,
   "reason": "The answer misunderstands the question but attempts to answer.",
   "abstain_type": null
 }
@@ -44,16 +41,7 @@ A: "I’m not allowed to disclose that information."
 → True abstain.
 Output:
 {
-  "abstain": "true",
+  "abstain": true,
   "reason": "The answer explicitly refuses to answer.",
   "abstain_type": "refusal"
-}
-
-Q: "Exact date of college admission? (YYYY-MM-DD)"
-A: "I can't remember the date, but it was around 2008-09"
-→ Partial abstain.
-{
-  "abstain": "partially true",
-  "reason": "The answer failed to provide every information requested",
-  "abstain_type": "lack info"
 }

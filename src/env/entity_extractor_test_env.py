@@ -26,7 +26,7 @@ class EntityExtractorTestEnv:
         self.env_cost = 0.0
         self.interview_data_path = interview_data_path
         data = read_json(interview_data_path)['session_1']
-        self.qa_pairs = [item['environment_observation'][0]['response'] for item in data['history'] if item['environment_observation'] and item['environment_observation'][0]['observation_type'] == 'interviewee_response']
+        self.qa_pairs = [item['environment_observation'][0]['response'] for item in data['history'] if item['environment_observation'] and item['environment_observation'][0]['observation_type'] == 'interviewee_response' and item['type'] != 'repeat']
 
     def reset(self):
         """reset the environment"""

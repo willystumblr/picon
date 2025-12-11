@@ -69,7 +69,7 @@ class EntityExtractorTestEnv:
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result={
-            "agents_info": "kg_agent",
+            "agents_info": "extractor_agent",
             "source_data_path": self.interview_data_path,
             "total_cost": self.agent.cost + self.env_cost,
             "duration": f"{(time.time() - self.start_time)/60} min", # in minutes
@@ -78,7 +78,6 @@ class EntityExtractorTestEnv:
             "agent_memory": {
                 self.agent.role: self.agent.memory
             },
-            "interviewee_kg": self.agent.kg
         }
         write_json(final_result, path)
         
@@ -107,4 +106,4 @@ if __name__ == "__main__":
     done = False
     while not done:
         state, done = env.step()
-    env.save_state(f"data/prompt_engineering/entity_extractor/entity_extractor_test_history_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    env.save_state(f"data/prompt_engineering/entity_extractor/entity_extractor_{time.strftime('%Y%m%d_%H%M%S')}_{args.model}_{args.interview_data_path.split('/')[-1].split('.')[0]}.json")

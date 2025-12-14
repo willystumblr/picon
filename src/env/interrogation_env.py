@@ -77,7 +77,10 @@ class InterrogationEnv:
         # repeat
         self.repeat_score = 0
         self.repeat_results = []
-    
+
+        # confimation prompt
+        with open(f"{project_root}/src/agents/prompts/confirmation_prompt.txt") as f:
+            self.confirmation_prompt = f.read()
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -196,7 +199,8 @@ class InterrogationEnv:
                             "role": "tool",
                             "tool_call_id": output.tool_call_id,
                             "name": output.tool_name,
-                            "content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nClaims: {list_of_extractions[filtered_actions_indices[i]]['claims']}\nRationale: {list_of_extractions[filtered_actions_indices[i]]['rationale']}\nSearch Result:{str(output.output)}"
+                            #"content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nClaims: {list_of_extractions[filtered_actions_indices[i]]['claims']}\nRationale: {list_of_extractions[filtered_actions_indices[i]]['rationale']}\nSearch Result:{str(output.output)}"
+                            "content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nSearch Result:{str(output.output)}"
                         }
                     ]
                     
@@ -206,13 +210,7 @@ class InterrogationEnv:
                     messages = [
                         {
                             "role": "system",
-                            "content": (
-                                "Ask a short, concise \"affirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
-                                "Assume that no further search is available beyond the provided search results. "
-                                "If the tool `google_claim_search`'s search results are lacks all components ('title', 'link', and 'text_block') due to search failure or error, respond with a single word 'SKIP' (only one time) to indicate that no confirmation question can be generated (without explanation). "
-                                "If search results are available but 'text_block is incomplete or insufficient to form a meaningful question, use only the available information (either 'title' or 'link') to form your question. "
-                                "Generate either 'SKIP' or a single question without any additional explanation. "
-                            )
+                            "content": self.confirmation_prompt 
                         },
                     ]
                     messages.extend(sub_message)

@@ -251,10 +251,6 @@ class GoogleClaimSearch(BaseModel):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "claim": {
-                            "type": "string",
-                            "description": "A claim or statement in natural language (provided by the user) that needs to be verified."
-                        },
                         "q": {
                             "type": "string",
                             "description": "Query; a keyword that needs to be searched for fact verification."
@@ -264,11 +260,91 @@ class GoogleClaimSearch(BaseModel):
                             "description": "Geolocation of end user. The country code (e.g., 'us', 'uk', 'ca', 'jp', 'kr') to tailor search results to a specific region.",
                         },
                     },
-                    "required": ["claim", "q", "gl"] #, "exactTerms", ],
+                    "required": ["q", "gl"] #, "exactTerms", ],
                 },
             },
         }
         
+    def invoke_batch(self, claims: List[str], q: str, gl: str) -> str:
+        """
+        Process multiple claims with the same query and geolocation.
+        
+        Parameters
+        ----------
+        claims : List[str]
+            A list of factual claims / statements in natural language.
+        
+        q: str
+            A keyword that needs to be searched for fact verification.
+
+        gl: str
+            Geolocation country code.
+
+        Returns
+        -------
+        str
+            JSON stringified dict mapping each claim to its relevant passages.
+        """
+        try:
+            search_url = "https://www.googleapis.com/customsearch/v1"
+            q_params = {
+                "q": q,
+                "key": self.api_key,
+                "cx": self.cx,
+                "num": TOP_K_RESULTS,
+                "gl": gl,
+            }
+            resp = requests.get(search_url, params=q_params, timeout=6)
+            resp.raise_for_status()
+            self.tool_call_counts += 1
+            items = resp.json().get("items", [])
+
+            # Fetch all pages once
+            all_passages: List[str] = []
+            page_info: List[Dict[str, Any]] = []
+            
+            for it in items:
+                url = it.get("link")
+                if not url:
+                    continue
+
+                fetched = self._fetch(url)
+                if "error" in fetched:
+                    page_info.append({"title": fetched["title"], "link": url, "error": fetched["error"]})
+                    continue
+                    
+                passages = _split_passages(fetched["cleaned"])
+                all_passages.extend(passages)
+                page_info.append({"title": fetched["title"], "link": url})
+
+            # For each claim, find the most relevant passages
+            
+            passages_set = []
+            if not all_passages:
+                results = [{
+                        "query": q,
+                        "gl": gl,
+                        "pages": page_info,
+                        "text_block": ["No text could be extracted from the top results."]
+                    }]
+            else:
+                for claim in claims:
+                    top_passages = _top_passages(claim, all_passages)
+                    passages_set.extend(top_passages)
+                    passages_set = list(set(passages_set))  # remove duplicates
+                results =[{
+                    "query": q,
+                    "gl": gl,
+                    "pages": page_info,
+                    "text_block": passages_set
+                }]        
+                   
+
+            return json.dumps(results, ensure_ascii=False)
+        except Exception as outer:
+            error_result = [{"query": q, "gl": gl, "text_block": f"Search failure: {outer}"}]
+            return json.dumps(error_result, ensure_ascii=False)
+
     def calculate_cost(self) -> float:
         # Custom Search API costs
         # 100 queries per day are free

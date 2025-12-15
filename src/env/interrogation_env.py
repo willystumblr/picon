@@ -91,7 +91,7 @@ class InterrogationEnv:
             
             
             tool = self.tools[tool_name]
-            tool_output = tool.invoke(**action.tool_call.arguments)
+            tool_output = tool.invoke(**action.tool_call.arguments) if 'claim' in action.tool_call.arguments else tool.invoke_batch(**action.tool_call.arguments) # batch for claims list
             logging.info(f"[TOOL OUTPUT] {tool_name}: {tool_output[:100]}...") # print first 100 chars
             
             output = ToolOutput(

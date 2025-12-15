@@ -31,7 +31,7 @@ class EvaluatorTestEnv:
     def __init__(
         self, 
         model: str, 
-        interview_path: str,
+        interview_path: Any | str | Dict,
         **kwargs
         ):
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -41,17 +41,16 @@ class EvaluatorTestEnv:
         self.port = kwargs.get('port', None)
         self.start_time = time.time()
         self.env_cost = 0.0
-        self.interview_path = interview_path
+        self.interview_path = interview_path if isinstance(interview_path, str) else "provided as dict"
         self.all_data = read_json(interview_path) if isinstance(interview_path, str) else interview_path
-        if "session_1" in self.all_data: 
+        if "session_1" in self.all_data:
             data = self.all_data["session_1"]
-            self.num_sessions = 2
+            self.num_sessions = len([k for k in self.all_data.keys() if k.startswith('session_')])
         else:
             data = self.all_data
             self.num_sessions = 1
         
-        self.evaluator_history = data["agent_memory"]["evaluator"]
-        self.evaluator_history = [self.evaluator_history[i] for i in range(len(self.evaluator_history)) if self.evaluator_history[i-1]!=self.evaluator_history[i] or i==0]
+        self.evaluator_history = data["agent_memory"]["evaluator"][1:]  # skip the initial system message
         self.history = data['history']
         
         self.repeat_results = data['repeat'].get('repeat_results', [])
@@ -75,6 +74,8 @@ class EvaluatorTestEnv:
             get_to_knows = [turn["environment_observation"][0]['response'] for turn in d['history'] if turn['type'] == "get_to_know"]
             self.inter_session_data[session_id] = get_to_knows
         # gather each question-response pair across sessions
+        self.abstention_rate = 0.0
+        self.abstention_results = []
         self.inter_session_results = []
         self.inter_session_score = None
 
@@ -93,29 +94,30 @@ class EvaluatorTestEnv:
         # self.state = State(current_turn=1, history=[]) # n-th turn indicates the n-th user response
         self.user_indices = [i for i in range(0, len(self.evaluator_history)) if self.evaluator_history[i]['role']=='user'] # every 3 turns correspond to one user response
         
-        self.qa_pairs = [
-            { 
-                'question': self.evaluator_history[i-1]['content'],
-                'content': self.evaluator_history[i]['content']
-            } 
-            for i in self.user_indices if self.evaluator_history[i-2]['role']!='tool'
-        ]
-        self.user_indices.pop(0)  # remove the first user input which is the initial question
-
+        self.qa_pairs = []
+        for turn in self.history:
+            if turn['type']!='repeat':
+                for env_obs in turn['environment_observation']:
+                    if env_obs["observation_type"] == "interviewee_response":
+                        question = env_obs["response"]["question"]
+                        content = env_obs["response"]["content"]
+                        self.qa_pairs.append({
+                            "question": question,
+                            "content": content
+                        })
+        self.user_indices.pop(0)  # remove the first user input which is the initial question for each-turn eval
+        return
+    
     def _find_turn_idx(self, idx) -> int:
         """find the turn index in self.history corresponding to the idx-th user response in self.evaluator_history"""
-        turn_idx = None
         user_response = self.evaluator_history[idx]['content']
-        #breakpoint()
         for i, turn in enumerate(self.history):
             if turn['type'] != 'repeat':
                 for env_obs in turn['environment_observation']:
                     if env_obs["observation_type"] == "interviewee_response":
                         if env_obs["response"]["content"] == user_response:
-                            turn_idx = i
-                            break
-        return turn_idx
-
+                            return i
+        return None
     def score_conflict(self, idx, verdict_action: Action):
         self.all_verdicts.append({
             "message_idx": idx,
@@ -160,12 +162,13 @@ class EvaluatorTestEnv:
             response_format = EvaluationResponseExternal
             ground = "external"
         else:
+            response_format = EvaluationResponseInternal
             ground = 'internal'
         completion_kwargs = dict(
             model=self.model,
             #messages=messages[:-1] + [{'role' : messages[-1]['role'] , 'content': messages[-1]['content'] + f"[conflict type] ground: {ground}"}], 
             messages=messages,
-            temperature=1.0,
+            temperature=0.7,
             response_format=response_format
         )
         if self.model.startswith("hosted_vllm/"):
@@ -173,27 +176,17 @@ class EvaluatorTestEnv:
             completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"    
         verdict = get_completion(**completion_kwargs)
         self.env_cost += completion_cost(verdict) if not self.model.startswith("hosted_vllm/") else 0.0
-        return verdict
+        return verdict, response_format
     
     def abstention_eval(self):
-        evaluator_mem = self.evaluator_history
-        user_resp = [(i, item) for i, item in enumerate(evaluator_mem) if item['role']=='user']
-        qa_pairs = []
-        for idx, user_item in user_resp:
-            assistant_question = evaluator_mem[idx-1]['content']
-            user_answer = user_item['content']
-            qa_pairs.append({
-                "question": assistant_question,
-                "content": user_answer
-            })
         class OutputSchema(BaseModel):
             abstain: Literal['true', 'partially true', 'false'] = Field(..., description="Whether the provided response is abstaining from answering the question.")
             reason : str = Field(..., description="A brief explanation for the abstention decision.")
             abstain_type: Literal['none', 'refusal', 'lack info', 'asking back', 'unrelated'] = Field(..., description="The type of abstention (e.g., 'lack info', 'unknown', etc.).")
 
-        logging.info(f"Evaluating {len(qa_pairs)} QA pairs...")
+        logging.info(f"Evaluating {len(self.qa_pairs)} QA pairs...")
         completion_kwargs_list = []
-        for qa in qa_pairs:
+        for qa in self.qa_pairs:
             completion_kwargs = dict(
                 model=self.model,
                 messages=[
@@ -216,7 +209,7 @@ class EvaluatorTestEnv:
             results = list(tqdm(executor.map(
                 lambda kwargs: get_completion(**kwargs),
                 completion_kwargs_list
-            ), total=len(qa_pairs), desc="Evaluating QA pairs"))
+            ), total=len(self.qa_pairs), desc="Evaluating QA pairs"))
         self.env_cost += sum(completion_cost(res) for res in results) if not self.model.startswith("hosted_vllm/") else 0.0
         logging.info("Evaluation completed.")
     
@@ -255,10 +248,6 @@ class EvaluatorTestEnv:
             for idx, verdict in zip(self.user_indices, verdicts):
                 verdict, response_format = verdict
                 try:
-                    # if verdict.choices[0].message.content.strip().find('"ground":"external"') != -1:
-                    #     EvaluationResponse = EvaluationResponseExternal
-                    # else:
-                    #     EvaluationResponse = EvaluationResponseInternal
                     response = response_format.model_validate_json(verdict.choices[0].message.content)
                 except Exception as e:
                     logging.error(f"[EVALUATOR] Validation error at index {idx}: {e} / message content: {verdict.choices[0].message.content}")
@@ -272,10 +261,7 @@ class EvaluatorTestEnv:
                     content=content
                 )
                 self.score_conflict(idx, verdict_action)
-            # breakpoint()
-        # inter-session consistency
-        # for each element pair/triplet/whatsoever in self.all_data.values() with same index across sessions, 
-        # i.e. get_to_knows[0] in session 1, get_to_knows[0] in session 2, get_to_knows[0] in session 3, ...
+            
         if self.num_sessions > 1:
             inter_session_messages_list = []
             num_get_to_knows = min([len(v) for v in self.inter_session_data.values()])
@@ -330,7 +316,7 @@ class EvaluatorTestEnv:
     def save_state(self, path: str, termination_status: str = "Successfully completed"):
         """save the current state to a json file"""
         final_result = {
-            "interview_path": self.interview_path,
+            "interview": self.interview_path,
             "total_cost": self.env_cost,
             "duration": f"{(time.time() - self.start_time)/60:.2f} minutes",
             "first_conflict_turn": self.first_conflict_turn,

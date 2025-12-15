@@ -80,6 +80,8 @@ class WebSearchAgent(Agent):
                 tool_call = res_['tool_calls'][0]
                 tool_name = tool_call['function']['name']
                 arguments = json.loads(tool_call['function']['arguments'])
+                if claims:
+                    arguments['claims'] = claims
                 return Action(
                     agent=self.role,
                     action_type="tool_call",

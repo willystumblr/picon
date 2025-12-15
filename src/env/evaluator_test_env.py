@@ -43,7 +43,7 @@ class EvaluatorTestEnv:
         self.env_cost = 0.0
         self.interview_path = interview_path
         self.all_data = read_json(interview_path) if isinstance(interview_path, str) else interview_path
-        if "session_1" in self.all_data and "session_2" in self.all_data:
+        if "session_1" in self.all_data: 
             data = self.all_data["session_1"]
             self.num_sessions = 2
         else:
@@ -52,7 +52,7 @@ class EvaluatorTestEnv:
         
         self.evaluator_history = data["agent_memory"]["evaluator"]
         self.evaluator_history = [self.evaluator_history[i] for i in range(len(self.evaluator_history)) if self.evaluator_history[i-1]!=self.evaluator_history[i] or i==0]
-        #self.history = data['history']
+        self.history = data['history']
         
         self.repeat_results = data['repeat'].get('repeat_results', [])
         self.repeat_score = [(res["is_repeat"]=="TRUE") for res in self.repeat_results].count(True) / len(self.repeat_results) if len(self.repeat_results) > 0 else None
@@ -69,7 +69,7 @@ class EvaluatorTestEnv:
         self.all_verdicts = []
         
         self.inter_session_data = {}
-        for session_id, d in all_data.items():
+        for session_id, d in self.all_data.items():
             if not session_id.startswith('session_'):
                 continue
             get_to_knows = [turn["environment_observation"][0]['response'] for turn in d['history'] if turn['type'] == "get_to_know"]
@@ -107,10 +107,13 @@ class EvaluatorTestEnv:
         turn_idx = None
         user_response = self.evaluator_history[idx]['content']
         #breakpoint()
-        for i in self.user_indices[:-10]:
-            if self.evaluator_history[i-2]['role']!='tool' and self.evaluator_history[i]['content']== user_response:
-                turn_idx = i
-                break
+        for i, turn in enumerate(self.history):
+            if turn['type'] != 'repeat':
+                for env_obs in turn['environment_observation']:
+                    if env_obs["observation_type"] == "interviewee_response":
+                        if env_obs["response"]["content"] == user_response:
+                            turn_idx = i
+                            break
         return turn_idx
 
     def score_conflict(self, idx, verdict_action: Action):
@@ -120,8 +123,8 @@ class EvaluatorTestEnv:
         })
         if verdict_action.content['verdict'] == 'conflict': # verdict_action.content['ground'] == 'internal':
             turn_idx = self._find_turn_idx(idx)
-            question = self.evaluator_history[turn_idx-1]['content']
-            response = self.evaluator_history[turn_idx]['content']
+            question = self.history[turn_idx]['environment_observation'][0]['response']['question']
+            response = self.history[turn_idx]['environment_observation'][0]['response']['content']
             logging.info(f"[EVALUATOR] Conflict detected at turn {turn_idx} for Question: {question}, Response: {response}")
             if verdict_action.content['ground'] == 'internal':
                 self.internal_count += 1

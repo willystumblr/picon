@@ -98,6 +98,7 @@ class IntervieweeSimulator:
             self.instruction = kwargs['instruction']
             self.counterpart_name = kwargs['counterpart_name']
             self.prompt_flag = "Your conversation so far is below:\nConversation: \n"
+            self.port = kwargs['port']
         
         else: # human_interview
             self.name = input("Enter your name: ") if self.name is None else self.name
@@ -198,7 +199,7 @@ class IntervieweeSimulator:
                     add_generation_prompt=True,
                 )
 
-                if input_ids.shape[1] <= 8192: # assuming model max position is 8192
+                if input_ids.shape[1]+1024 <= 8192: # assuming model max position is 8192
                     break
                 
                 self.history = self.history[2:]  # drop the oldest message

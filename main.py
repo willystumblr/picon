@@ -48,6 +48,7 @@ def parse_args():
     parser.add_argument('--output_dir', type=str, default='data/results', help='Directory to save the results.')
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
     
+    
     return parser.parse_args()
 
 def run_session(args, env: InterrogationEnv, reset_only=False):
@@ -192,7 +193,7 @@ if __name__ == "__main__":
             })
     elif args.baseline_name == "consistent_llm":
         dataset = read_jsonl("src/env/personas/consistent_llm_personas.jsonl")
-        if args.sample:
+        if args.do_sample:
             import random
             random.seed(args.seed)
             dataset = random.sample(dataset, k=10)
@@ -208,7 +209,7 @@ if __name__ == "__main__":
                 "nhd_port": args.nhd_port,
                 "question_seed": args.question_seed,
                 "simulator_model": args.simulator_model,
-                "port": args.port
+                "port": args.simulator_port
             })
     elif args.baseline_name == "human_interview":
         interviewee_kwargs = [{

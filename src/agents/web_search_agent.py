@@ -60,7 +60,7 @@ class WebSearchAgent(Agent):
                 break
 
         if proceed_to_web_search == 'yes': # , and the claim: {claim}, with rationale: {rationale}
-            prompt = f"Search {entity} with a proper tool." if entity and entity!="no entity" else f"Search the claim: {claims} with a proper tool."
+            prompt = f"Search {entity} with a proper tool. Claims for this entity are as follows: {claims}" if entity and entity!="no entity" else f"Search the claim: {claims} with a proper tool."
             completion_kwargs = dict(
                 model=self.model,
                 messages=self.memory + [{"role": "user", "content": prompt}], # no memory needed

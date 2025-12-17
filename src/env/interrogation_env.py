@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 import random
 import asyncio
+import litellm
+#litellm._turn_on_debug()
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
@@ -199,14 +201,17 @@ class InterrogationEnv:
                             "role": "tool",
                             "tool_call_id": output.tool_call_id,
                             "name": output.tool_name,
-                            #"content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nClaims: {list_of_extractions[filtered_actions_indices[i]]['claims']}\nRationale: {list_of_extractions[filtered_actions_indices[i]]['rationale']}\nSearch Result:{str(output.output)}"
-                            "content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nSearch Result:{str(output.output)}"
+                            "content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nClaims: {list_of_extractions[filtered_actions_indices[i]]['claims']}\nRationale: {list_of_extractions[filtered_actions_indices[i]]['rationale']}\nSearch Result:{str(output.output)}"
+                            #"content": f"Entity:{list_of_extractions[filtered_actions_indices[i]]['entity']}\nSearch Result:{str(output.output)}"
                         }
                     ]
                     
                     """tool call 결과를 evaluator 메모리에 추가"""
                     self.agents['evaluator'].update_memory(**sub_message[1]) ####### 여기 #######
-                    self.agents['evaluator'].update_memory(**sub_message[2]) ####### 여기 #######
+                    #tool_output = sub_message[2]
+                    #tool_output['claim'] = str(list_of_extractions[filtered_actions_indices[i]]['claims'])
+                    self.agents['evaluator'].update_memory(**sub_message[2]) ####### 여기 ####y
+                    ###
                     messages = [
                         {
                             "role": "system",

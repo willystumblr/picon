@@ -46,7 +46,7 @@ class ExtractorAgent(Agent):
                 )
                 self._calculate_cost(res)
                 res_ext = EntityClaim.model_validate_json(res.choices[0].message.content)  # validate response format
-                if not res_ext.extracted or len(res_ext.extracted) == 0:
+                if not res_ext.extracted or len(res_ext.extracted) == 0 or not any(item.entity for item in res_ext.extracted):
                     logging.warning("Extractor did not find any entities or claims. Skipping to next agent.")
                     self.memory.append({"role":"assistant", "content":"No entities extracted."})
                     return Action(
@@ -54,11 +54,14 @@ class ExtractorAgent(Agent):
                         action_type="next_agent",
                         target_agent="questioner"
                     )
-                self.memory.append({"role":"assistant", "content":str([extracted.model_dump_json() for extracted in res_ext.extracted])})
+                
+                filtered_res_ext = [item for item in res_ext.extracted if item.entity]
+                
+                self.memory.append({"role":"assistant", "content":str([extracted.model_dump_json() for extracted in filtered_res_ext])})
                 return Action(
                     agent=self.role,
                     action_type="respond",
-                    content = res_ext.extracted # list of ExtractorResponse
+                    content = filtered_res_ext # list of ExtractorResponse
                 )
             
             except (ValidationError, json.JSONDecodeError) as e:

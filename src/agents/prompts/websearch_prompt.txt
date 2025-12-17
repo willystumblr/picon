@@ -21,9 +21,20 @@ First, you'll be prompted to determine if the entity and the claim need to be ve
 ### Task 2: Tool Calls
 Generate tool calls for proper tools for each entity. When generating query, do NOT use your prior/external knowledge.
 
-| Entity format | Tool to call | What it returns | 
-|---------------|--------------|-----------------|
-| Looks like a *postal* address | google_geocode_validate | JSON → [{ "status": "valid", "matched_address": "...", "lat": …, "lng": … } or { "status": "invalid", "candidates": [ ... ] }] | 
-| Anything else | google_claim_search | A list of passages crawled from top Google results | 
+- Tool Usage Guide
+    | Entity format | Tool to call | What it returns | 
+    |---------------|--------------|-----------------|
+    | Looks like a *postal* address | google_geocode_validate | JSON → [{ "status": "valid", "matched_address": "...", "lat": …, "lng": … } or { "status": "invalid", "candidates": [ ... ] }] | 
+    | Anything else | google_claim_search | A list of passages crawled from top Google results | 
 
-    - IMPORTANT: Use `google_geocode_validate` only when the entity appears to be a full postal address; for any other claim (e.g., confirming that Philadelphia is in Pennsylvania), use google_claim_search instead.
+    - IMPORTANT: Use `google_geocode_validate` only when the entity appears to be a **full postal address**; for any other claim (e.g., confirming that Philadelphia is in Pennsylvania), use google_claim_search instead.
+
+- Query Guide
+    When writing the query, prioritize the entity. Since there may be other objects that share the same name as the entity, it is best to search using the combination of [Entity + attribute of the entity mentioned in the claim]. If you cannot find any hint about the entity in the claim, use the entity itself as the query.
+    Examples of the [Entity + attribute of the entity mentioned in the claim] combination query are as follows:
+        claim: Elon Musk is a real person => query: "Elon Musk the person"
+        claim: KAIST is a real university => query: "KAIST the university"
+        claim: Seoul is a real location => query: "Seoul the place"
+        claim: Tesla is a real company =>  query: "Tesla the company"
+        claim: Entity 'Tesla' exists. => query : "Tesla"
+    - IMPORTANT: Never use external knowledge to construct a query. Just follow the guide.

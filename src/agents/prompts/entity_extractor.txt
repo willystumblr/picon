@@ -5,7 +5,7 @@ Your task is to:
 2.  For each entity, generate a simple, standardized claim to 
   (1) verify its existence.
   (2) verify the atomic fact within the interviewee's response.
-Hence, multiple claims can be mapped to a single entity (e.g., "I watched a movie called <K-Pop Demon Hunters> in June 2025." -> if <K-Pop Demon Hunters> is a real movie, and was released in or before June 2025).
+Multiple claims can be mapped to a single entity (e.g., "I watched a movie called <K-Pop Demon Hunters> in June 2025." -> if <K-Pop Demon Hunters> is a real movie, and was released in or before June 2025).
 In such cases, map those claims to the entity (e.g., "K-Pop Demon Hunters" -> ["<K-Pop Demon Hunters> is a real movie.", "<K-Pop Demon Hunters> was released in or before June 2025."]) 
 
 Process the input sentence by sentence and merge all findings into a single final JSON object.
@@ -19,6 +19,10 @@ Process the input sentence by sentence and merge all findings into a single fina
     -   **Common nouns**: e.g., "company", "address", "local businesses".
     -   **Vague phrases, emotional statements, or unverifiable generalities**: e.g., "a pretty small company", "around a dozen of us".
     -   **Temporal, numerical, or purely descriptive information** (e.g., specific dates, times, quantities, or measurements); *unless* they are part of a named entity (e.g., “CES 2024”, “Formula 1 2023”)
+-   Rules for Location Entities
+    - If the user mentions a city, province/state, country, etc., in a location-related response, extract each as an individual entity.
+    - For example, if the user lives in "Boston, Massachusetts, USA," then Boston, Massachusetts, and the USA are each separate entities, and each must be verified as a location.
+    - Do not extract them as a single combined entity like "Boston, Massachusetts."
 
 ### Rules for Claim Generation:
 - Type 1: an event
@@ -39,10 +43,6 @@ Process the input sentence by sentence and merge all findings into a single fina
 -   Generate claims that are contextually appropriate to the given response.
 -   You may refer to the question to specify what needs to be verified; e.g., you may refer to other named entities mentioned in the question to decontextualize the claim.
 
-### Other Important Instructions:
--   Only include entities verifiable through public web sources.
--   Decontextualize pronouns (e.g., "it", "they") and use the actual entity name if mentioned.
--   Avoid redundancy: Do not generate identical entity-claim pairs that were previously extracted during the conversation, even if the entity meets the extraction rules.
 
 ### Output Format:
 Return **exactly** one JSON object that conforms to this schema. Do not add any extra text, markdown, or comments.
@@ -77,3 +77,9 @@ Response: The name of the company is “The Social Network Ltd.”, our main off
       }
     ]
 }
+
+### Important Instructions:
+-   Only include entities verifiable through public web sources.
+-   Decontextualize pronouns (e.g., "it", "they") and use the actual entity name if mentioned.
+-   Never use external knowledge to generate entity and claims.
+-   **Avoid redundancy: Do NOT generate identical entity-claim pairs that were previously extracted during the conversation, even if the entity meets the extraction rules.**

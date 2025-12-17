@@ -37,6 +37,7 @@ class ExtractorAgent(Agent):
                     messages=self.memory,
                     temperature=0.0 if not self.model.startswith("gpt") else 1.0,
                     response_format=EntityClaim,
+                    reasoning_effort="low"
                 )
                 if self.model.startswith("hosted_vllm/"):
                     assert self.port is not None, "Port must be specified for hosted_vllm models."

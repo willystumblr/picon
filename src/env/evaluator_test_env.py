@@ -116,17 +116,16 @@ class EvaluatorTestEnv:
                 for env_obs in turn['environment_observation']:
                     if env_obs["observation_type"] == "interviewee_response":
                         if env_obs["response"]["content"] == user_response:
-                            return i
-        return None
+                            question = env_obs["response"]["question"]
+                            return i, question, user_response
+        raise ValueError(f"Could not find turn index for user response: {user_response}")
     def score_conflict(self, idx, verdict_action: Action):
         self.all_verdicts.append({
             "message_idx": idx,
             "verdicts": {'value': verdict_action.content['verdict']}
         })
         if verdict_action.content['verdict'] == 'conflict': # verdict_action.content['ground'] == 'internal':
-            turn_idx = self._find_turn_idx(idx)
-            question = self.history[turn_idx]['environment_observation'][0]['response']['question']
-            response = self.history[turn_idx]['environment_observation'][0]['response']['content']
+            turn_idx, question, response = self._find_turn_idx(idx)
             logging.info(f"[EVALUATOR] Conflict detected at turn {turn_idx} for Question: {question}, Response: {response}")
             if verdict_action.content['ground'] == 'internal':
                 self.internal_count += 1

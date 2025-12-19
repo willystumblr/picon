@@ -170,7 +170,7 @@ class GoogleClaimSearch(BaseModel):
             return {"title": "", "error": f"[Error fetching] {e}"}
     
     # ------------- tool entry point -------------
-    def invoke(self, claim: str, q: str, gl: str) -> str:
+    def invoke_single(self, claim: str, q: str, gl: str) -> str:
         """
         Parameters
         ----------
@@ -265,7 +265,7 @@ class GoogleClaimSearch(BaseModel):
             },
         }
         
-    def invoke_batch(self, claims: List[str], q: str, gl: str) -> str:
+    def invoke(self, claims: List[str], q: str, gl: str) -> str:
         """
         Process multiple claims with the same query and geolocation.
         

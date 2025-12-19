@@ -169,7 +169,7 @@ class IntervieweeSimulator:
 
             
             res = get_completion(
-                model=f"hosted_vllm/{self.simulator_model}",
+                model=self.simulator_model,
                 messages=self.history,
                 reasoning_effort="low",
                 api_base=f"http://localhost:{self.port}/v1",
@@ -205,7 +205,7 @@ class IntervieweeSimulator:
                 self.history = self.history[2:]  # drop the oldest message
                 
             res = get_completion(
-                model=f"hosted_vllm/{self.simulator_model}",
+                model=self.simulator_model,
                 messages=[{"role":"system", "content": self.persona}, {"role":"user", "content": input_message}],
                 reasoning_effort="low",
                 api_base=f"http://localhost:{self.port}/v1",

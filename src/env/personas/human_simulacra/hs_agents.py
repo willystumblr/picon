@@ -9,6 +9,7 @@ import sys
 import logging
 from colorama import Fore, Style
 from dotenv import load_dotenv
+import tiktoken
 from tiktoken import encoding_for_model
 from litellm import get_max_tokens
 
@@ -606,7 +607,10 @@ class Top_agent:
         flattened_messages = [item for sublist in self.current_messages for item in sublist]
         
         # Count tokens in the messages
-        enc = encoding_for_model(self.model)
+        try:
+            enc = encoding_for_model(self.model)
+        except KeyError:
+            enc = tiktoken.get_encoding("o200k_base")
         token_count = 0
         
         # Calculate total token count

@@ -35,7 +35,7 @@ class ExtractorAgent(Agent):
                 completion_kwargs = dict(
                     model=self.model,
                     messages=self.memory,
-                    temperature=0.0 if not self.model.startswith("gpt") else 1.0,
+                    temperature=0.0 if not (self.model.startswith("gpt") or self.model.startswith("anthropic/")) else 1.0,
                     response_format=EntityClaim,
                     reasoning_effort="low"
                 )

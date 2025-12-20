@@ -71,7 +71,7 @@ def run_session(args, env: InterrogationEnv, reset_only=False):
 
 def main(args, interviewee_kwarg):
     results_complete = {}
-    result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+    result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{args.questioner_model}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
     
     for session_idx in range(args.num_sessions):
         tools = {

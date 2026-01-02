@@ -13,7 +13,8 @@ class WebSearchAgent(Agent):
             role=kwargs.get('role', "web_search"),
             system_message=kwargs.get('system_message', ""),
             model=kwargs.get('model', "gemini/gemini-2.5-flash"),
-            port=kwargs.get('port', None)
+            port=kwargs.get('port', None),
+            host=kwargs.get('host', 'localhost')
         )
         self.tools = kwargs.get('tools', [])
         self.cutoff_date = time.strftime("%B %d, %Y") # default to current date
@@ -45,14 +46,15 @@ class WebSearchAgent(Agent):
             completion_kwargs = dict(
                 model=self.model,
                 messages=self.memory + [{"role": "user", "content": prompt}],
-                tool_choice="none",
-                tools=self.tools,
                 reasoning_effort="low",
                 response_format=ResponseFormat,
             )
             if self.model.startswith("hosted_vllm/"):
                 assert self.port is not None, "Port must be specified for hosted_vllm models."    
-                completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+                completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
+            elif self.model.startswith("claude-"):
+                completion_kwargs['thinking'] = {"type": "enabled", "budget_tokens":1024}
+                completion_kwargs.pop('reasoning_effort') # claude does not support reasoning_effort
             res = get_completion(**completion_kwargs)
             self._calculate_cost(res)
             proceed_to_web_search = ResponseFormat.model_validate_json(res.choices[0].message.content).type.lower()
@@ -72,7 +74,10 @@ class WebSearchAgent(Agent):
             if self.model.startswith("hosted_vllm/"):
                 assert self.port is not None, "Port must be specified for hosted_vllm models."    
                 completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
-            
+            elif self.model.startswith("claude-"):
+                # completion_kwargs['thinking'] = {"type": "enabled", "budget_tokens":1024}
+                completion_kwargs.pop('reasoning_effort') # claude does not support reasoning_effort
+                
             res = get_completion(**completion_kwargs)
             self._calculate_cost(res)
             res_ = res.choices[0].message.model_dump()
@@ -80,7 +85,7 @@ class WebSearchAgent(Agent):
                 tool_call = res_['tool_calls'][0]
                 tool_name = tool_call['function']['name']
                 arguments = json.loads(tool_call['function']['arguments'])
-                if claims:
+                if claims and tool_name == 'google_claim_search':
                     arguments['claims'] = claims
                 return Action(
                     agent=self.role,

@@ -50,7 +50,7 @@ class EvaluatorAgent(Agent):
         )
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
-            completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+            completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
         
         res = get_completion(**completion_kwargs)   
         self._calculate_cost(res)

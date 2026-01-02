@@ -31,6 +31,13 @@ def parse_args():
     parser.add_argument('--evaluator_port', type=int, default=None, help='Port number for the evaluator agent server.')
     parser.add_argument('--simulator_port', type=int, default=None, help='Port number for the persona simulator.')
     parser.add_argument('--nhd_port', type=int, default=None, help='Port number for the NH detector in the interviewee simulator.')
+    # Host settings
+    parser.add_argument('--questioner_host', type=str, default='localhost', help='Host for the questioner agent server.')
+    parser.add_argument('--extractor_host', type=str, default='localhost', help='Host for the extractor agent server.')
+    parser.add_argument('--web_search_host', type=str, default='localhost', help='Host for the web search agent server.')
+    parser.add_argument('--evaluator_host', type=str, default='localhost', help='Host for the evaluator agent server.')
+    parser.add_argument('--simulator_host', type=str, default='localhost', help='Host for the persona simulator.')
+    parser.add_argument('--nhd_host', type=str, default='localhost', help='Host for the NH detector in the interviewee simulator.')
     # Other configurations
     parser.add_argument('--num_turns', type=int, default=30, help='Maximum number of turns in the interrogation.')
     parser.add_argument('--num_sessions', type=int, default=2, help='Number of interrogation sessions to run per interviewee.')
@@ -189,6 +196,7 @@ if __name__ == "__main__":
                 "question_seed": args.question_seed,
                 "simulator_model": args.simulator_model,
                 "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
                 "nhd_port": args.nhd_port,
             })
     elif args.baseline_name == "consistent_llm":
@@ -209,6 +217,7 @@ if __name__ == "__main__":
                 "nhd_port": args.nhd_port,
                 "question_seed": args.question_seed,
                 "simulator_model": args.simulator_model,
+                "simulator_host": args.simulator_host,
                 "port": args.simulator_port
             })
     elif args.baseline_name == "human_interview":

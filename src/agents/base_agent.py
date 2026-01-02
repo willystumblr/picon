@@ -17,6 +17,7 @@ class Agent(ABC):
         else:
             logging.warning("No model specified for the agent. Setting model to the default value: 'gemini/gemini-2.5-flash'.")
             self.model = 'gemini/gemini-2.5-flash'
+        self.host = kwargs.get('host', 'localhost')
         self.port = kwargs.get('port', None)
         self.cost = 0.0
 

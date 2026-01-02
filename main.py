@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
     # Model selection
-    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview'])
+    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview', 'naive_human_simulacra'])
     parser.add_argument('--questioner_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the questioner.')
     parser.add_argument('--extractor_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the extractor.')
     parser.add_argument('--web_search_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the web search agent.')
@@ -167,9 +167,9 @@ if __name__ == "__main__":
                 "question_seed": args.question_seed,
                 "nhd_port": args.nhd_port,
             })    
-    elif args.baseline_name == "human_simulacra":
+    elif "human_simulacra" in args.baseline_name:
         interviewee_kwargs = [{
-            "baseline_name": "human_simulacra",
+            "baseline_name": args.baseline_name,
             "name": name,            
             "nhd_model": args.nhd_model,
             "simulator_model": args.simulator_model,

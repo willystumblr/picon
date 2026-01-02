@@ -1,4 +1,4 @@
-from env.interviewee_simulator.base_interviewee_simulator import BaseIntervieweeSimulator
+from src.env.interviewee_simulator.base_interviewee_simulator import BaseIntervieweeSimulator
 from typing import Dict, Any
 
 def get_interviewee_simulator(
@@ -21,6 +21,9 @@ def get_interviewee_simulator(
     elif baseline_name == "human_simulacra":
         from src.env.interviewee_simulator.human_simulacra_simulator import HumanSimulacraSimulator
         return HumanSimulacraSimulator(**kwargs)
+    elif baseline_name == "naive_human_simulacra":
+        from src.env.interviewee_simulator.naive_human_simulacra_simulator import NaiveHumanSimulacraSimulator
+        return NaiveHumanSimulacraSimulator(**kwargs)
     elif baseline_name == "opencharacter":
         from src.env.interviewee_simulator.opencharacter_simulator import OpenCharacterSimulator
         return OpenCharacterSimulator(**kwargs)

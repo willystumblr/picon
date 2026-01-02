@@ -14,7 +14,7 @@ class BaseIntervieweeSimulator:
         self.name = kwargs.get('name', None)
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(os.path.dirname(current_dir))
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
         self.__nhd_prompt = open(f"{project_root}/src/agents/prompts/nhd_detector.txt", "r").read()
         self.__nhd_model = kwargs.get('nhd_model', "gemini/gemini-2.5-flash")
         self.__nhd_port = kwargs.get('nhd_port', None)

@@ -1,7 +1,7 @@
 import time
-from src.env.interviewee_simulator import IntervieweeSimulator
 from typing import List, Dict, Any
 from src.agents.base_agent import Agent
+from src.env.interviewee_simulator.simulator_factory import get_interviewee_simulator
 from src.agents.agent_factory import get_agent
 from src.schemas import State, Action, Observation, Turn, ToolOutput, IntervieweeResponse
 from src.tools.address_locator import GoogleGeocodeValidate
@@ -58,7 +58,7 @@ class InterrogationEnv:
             logging.info("Setting web search agent tools from environment.")
             self.agents['web_search'].tools = [tool.get_info() for tool in self.tools.values()]
         
-        self.interviewee = IntervieweeSimulator(
+        self.interviewee = get_interviewee_simulator(
             baseline_name=baseline_name,
             **kwargs # simulator specific args (character_id, user_id, name for characterai; model_path, persona, profile for opencharacter; name for human_simulacra)
         )

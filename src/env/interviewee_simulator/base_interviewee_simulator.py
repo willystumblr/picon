@@ -41,5 +41,28 @@ class BaseIntervieweeSimulator:
     def _get_response(self, message: str) -> IntervieweeResponse:
         raise NotImplementedError("This method should be implemented by subclasses.")
     
+    def _ai_check(self, message: str, response: str):
+        assert response is not None and response.strip() != "", "Received empty response from the interviewee."
+        while True:
+            completion_kwargs = dict(
+                model=self.__nhd_model,
+                messages=[{"role":"system", "content": self.__nhd_prompt}, {"role":"user", "content": f"Interviewer:{message}\nInterviewee: {response}"}],
+                reasoning_effort="low",
+                temperature=1.0 if self.__nhd_model.startswith("gpt") else 0.0,
+            )
+            if self.__nhd_model.startswith("hosted_vllm/"):
+                completion_kwargs['api_base'] = f"http://localhost:{self.__nhd_port}/v1"
+            res = get_completion(**completion_kwargs)
+            self.cost += completion_cost(res) if not self.__nhd_model.startswith("hosted_vllm/") else 0.0
+            res_ = res.choices[0].message.content.strip()
+            if res_ in ['### PASS ###', '### FAIL ###']:
+                break
+            else:
+                logging.warning("NHD Detector returned invalid response. Retrying...")
+                logging.warning(f"Response was: {res_}")
+        if res_ == '### FAIL ###':
+            logging.warning("AI Detected! Terminating the interview: " + response)
+            raise ValueError("AI Detected")
+    
     def calculate_cost(self) -> float:
         return self.cost

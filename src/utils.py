@@ -5,6 +5,7 @@ import logging
 import time
 import select
 import sys
+import litellm
 from litellm import completion
 from google import genai
 from google.genai import types
@@ -32,6 +33,7 @@ def write_jsonl(data: List[Any], file_path: str) -> None:
         for item in data:
             f.write(json.dumps(item) + "\n")
 def get_completion(model: str, messages: list, temperature: float = 1.0, max_retries=3, **kwargs):
+    litellm.drop_params = True
     for attempt in range(1, max_retries+1):
         try:
             response = completion(

@@ -10,7 +10,6 @@ import time
 from src.agents.base_agent import Agent
 from src.utils import get_completion
 from src.schemas import Action, Observation
-litellm.drop_params = True
 
 class QuestionerAgent(Agent):
     def __init__(self, **kwargs):
@@ -18,7 +17,8 @@ class QuestionerAgent(Agent):
             role=kwargs.get('role', "questioner"),
             system_message=kwargs.get('system_message', ""),
             model=kwargs.get('model', "gemini/gemini-2.5-flash"),
-            port=kwargs.get('port', None)
+            port=kwargs.get('port', None),
+            host=kwargs.get('host', 'localhost')
         )
 
     def set_cutoff_date(self, cutoff_date: str) -> None:
@@ -51,7 +51,7 @@ class QuestionerAgent(Agent):
         )
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
-            completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+            completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
         res = get_completion(**completion_kwargs)
         self._calculate_cost(res)
         # logging.info(f"[REASONING TRACE] {self.role} {res.choices[0].message.reasoning_content}")

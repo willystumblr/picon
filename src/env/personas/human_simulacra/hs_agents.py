@@ -7,7 +7,6 @@ import json
 import re
 import sys
 import logging
-from colorama import Fore, Style
 from dotenv import load_dotenv
 import tiktoken
 from tiktoken import encoding_for_model
@@ -371,7 +370,7 @@ class Top_agent:
                 self.biography = introduction['Content']
                 break
         if flag == False:
-            print(Fore.RED + "Can not find the information." + Style.RESET_ALL)
+            print("Can not find the information." )
             sys.exit(1)
 
         # Initialize three agents
@@ -399,9 +398,9 @@ class Top_agent:
         
         if not os.path.exists(os.path.join(MEMORY_DIR, self.name)):
             os.mkdir(os.path.join(MEMORY_DIR, self.name))
-            print(Fore.RED + "Long memory not found. Constructing long memory..." + Style.RESET_ALL)
+            print("Long memory not found. Constructing long memory..." )
             self.long_memory_construction()
-            print(Fore.RED + "Long memory construction completed." + Style.RESET_ALL)
+            print("Long memory construction completed." )
     
     def calculate_cost(self):
         total_cost = self.Thinking_Agent.cost + self.Emotion_Agent.cost + self.Memory_Agent.cost + self.cost
@@ -411,7 +410,7 @@ class Top_agent:
         ## adding new character attributes to the character's profile
         if not isinstance(new_attributes, dict):
             raise ValueError("new attributes must be a dictionary")
-        print(Fore.RED + "addng new attributes..." + Style.RESET_ALL)
+        logging.error("addng new attributes..." )
         with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
             introductions = json.load(file)
             for idx, introduction in enumerate(introductions):
@@ -422,17 +421,17 @@ class Top_agent:
                     introductions[idx]["Extra"] = Extra
                     break
         if flag == False:
-            print(Fore.RED + "Can not find the information." + Style.RESET_ALL)
+            print("Can not find the information." )
             sys.exit(1)
         with open(INTRODUCTIONS_PATH, "w", encoding="UTF-8") as file:
             json.dump(introductions, file, ensure_ascii=False, indent=4, separators=(',', ': ')) 
-        print(Fore.RED + "Task completed." + Style.RESET_ALL) 
+        print("Task completed." ) 
 
     def add_long_memory(self, new_life_story):
         if not isinstance(new_life_story, str):
             raise ValueError("new life story must be a string")
         
-        print(Fore.RED + "Constructing long memory..." + Style.RESET_ALL)
+        print("Constructing long memory..." )
         
         index_file_path = os.path.join(MEMORY_DIR, self.name, "index.json")
         with open(index_file_path, 'r') as file:
@@ -455,7 +454,7 @@ class Top_agent:
         self.Memory_Agent.Save_long_memory(long_memory)
         self.Memory_Agent.Save_index_file(index)
         
-        print(Fore.RED + "Long memory construction completed. You can start the conversation." + Style.RESET_ALL)
+        print("Long memory construction completed. You can start the conversation." )
     
     def long_memory_construction(self):
         # Complete process function for constructing long-term memory
@@ -489,7 +488,7 @@ class Top_agent:
                 long_memory_chunk = {"Memory_Summary" : memory_summary , "Memory" : memory}
                 index[string_num] = memory_summary
                 long_memory[string_num] = long_memory_chunk
-                print(Fore.RED + string_num + Style.RESET_ALL, end="\r")  # Display progress
+                print(string_num , end="\r")  # Display progress
                 # print(index)
                 # print("--------------------------")
                 # print(long_memory)
@@ -555,11 +554,11 @@ class Top_agent:
             with get_openai_callback() as cb:
                 agents_ans = self.chat(current_messages).content
                 # self.cost += cb.total_cost
-            print(Fore.GREEN + agents_ans + Style.RESET_ALL)
+            print(agents_ans )
             chat_history.append("The other person: " + query)
             chat_history.append("You: " + agents_ans)
             
-        print(Fore.RED + "The conversation is over." + Style.RESET_ALL)
+        print("The conversation is over." )
     
     
     def send_message(self, message:str): # single chat for multi-turn conversation
@@ -737,7 +736,7 @@ def Bandwagon_chat_with_naive_prompt(character_name, query, model:str="gpt-4.1-m
             character_biography = introduction['Content']
             break
     if flag == False:
-        print(Fore.RED + "Can not find the information." + Style.RESET_ALL)
+        print("Can not find the information." )
         sys.exit(1)
         
     System_prompt = open(os.path.join(PROMPT_DIR, "naive_simulacra_prompt_template.txt")).read().format(
@@ -791,7 +790,7 @@ def Bandwagon_chat_with_naive_rag(character_name, query, model:str="gpt-4.1-mini
             character_biography = introduction['Content']
             break
     if flag == False:
-        print(Fore.RED + "Can not find the information." + Style.RESET_ALL)
+        print("Can not find the information." )
         sys.exit(1)
     from langchain.document_loaders import PyPDFLoader
     from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -833,6 +832,69 @@ def Bandwagon_chat_with_naive_rag(character_name, query, model:str="gpt-4.1-mini
     return agents_ans.content
     
 
+class Naive_Agent:
+    # The Naive_Agent class is responsible for multi-turn chat with naive prompt only.
+    def __init__(self, character_name, model:str="gpt-4.1-mini-2025-04-14"):
+        self.api_base = BASE_URL
+        self.api_key = os.environ['OPENAI_API_KEY']
+        self.name = character_name
+        self.chat = ChatOpenAI(
+            openai_api_key = self.api_key,
+            openai_api_base = self.api_base,
+            model = model
+        )
+        self.cost = 0.0
+        flag = False
+        with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
+            introductions = json.load(file)
+        for introduction in introductions:
+            if introduction["Name"] == self.name:
+                flag = True
+                self.infos = introduction['Basic_infos']
+                if introduction["Extra"]:
+                    # Convert the Extra dictionary to a string format
+                    extra_info_str = ', '.join([f"{key}: {value}" for key, value in introduction["Extra"].items()])
+                    character_infos = introduction['Basic_infos'].strip('"\n') 
+                    # Append the Extra information to the Basic_infos string and restore the original format
+                    character_infos = f"\"\"\n" + character_infos.rstrip(".") + f", {extra_info_str}.\n\"\"\n"
+                    self.infos = character_infos
+                self.personality_traits = introduction['Personality_traits']
+                self.biography = introduction['Content']
+                break
+        if flag == False:
+            print("Can not find the information." )
+            sys.exit(1)
+            
+        self.system_prompt = open(os.path.join(PROMPT_DIR, "naive_simulacra_prompt_template.txt")).read().format(
+            character_name = character_name,
+            basic_information = self.infos,
+            personality_traits = self.personality_traits,
+            introduction = self.biography,
+        )
+        
+        self.current_messages = [SystemMessage(content=self.system_prompt)]
+        self.chat_history = []
+        
+    def send_message(self, message: str) -> str:
+        # single chat for multi-turn conversation
+        if self.chat_history:
+            history = "\n".join(self.chat_history)
+            context = "You're chatting with someone in a coffee shop. This is your conversation record: <<<\n" + history + ">>>"
+            self.current_messages.append(SystemMessage(content=context))
+        else:
+            self.current_messages.append(SystemMessage(content="You're chatting with someone in a coffee shop."))
+            
+        self.current_messages.append(HumanMessage(content=message))
+        with get_openai_callback() as cb:
+            agents_ans = self.chat.invoke(self.current_messages).content
+            self.cost += cb.total_cost
+        self.chat_history.append(message)
+        self.chat_history.append(agents_ans)
+        return agents_ans
+
+    def calculate_cost(self):
+        return self.cost
+
 def Multi_turn_chat_with_naive_prompt(character_name, model:str="gpt-4.1-mini-2025-04-14"):
     chat = ChatOpenAI(
         openai_api_key = os.environ['OPENAI_API_KEY'],
@@ -856,7 +918,7 @@ def Multi_turn_chat_with_naive_prompt(character_name, model:str="gpt-4.1-mini-20
             character_biography = introduction['Content']
             break
     if flag == False:
-        print(Fore.RED + "Can not find the information." + Style.RESET_ALL)
+        print("Can not find the information." )
         sys.exit(1)
         
     System_prompt = open(os.path.join(PROMPT_DIR, "naive_simulacra_prompt_template.txt")).read().format(
@@ -882,11 +944,11 @@ def Multi_turn_chat_with_naive_prompt(character_name, model:str="gpt-4.1-mini-20
 
         current_messages.append(HumanMessage(content=query))
         agents_ans = chat(current_messages).content
-        print(Fore.GREEN + agents_ans + Style.RESET_ALL)
+        print(agents_ans )
         chat_history.append(query)
         chat_history.append(agents_ans)
             
-    print(Fore.RED + "The conversation is over." + Style.RESET_ALL)
+    print("The conversation is over." )
 
 def Multi_turn_chat_with_blank_model(model:str="gpt-4.1-mini-2025-04-14"):
     # blank model, which does not know anything about the character.
@@ -910,11 +972,11 @@ def Multi_turn_chat_with_blank_model(model:str="gpt-4.1-mini-2025-04-14"):
 
         current_messages.append(HumanMessage(content=query))
         agents_ans = chat(current_messages).content
-        print(Fore.GREEN + agents_ans + Style.RESET_ALL)
+        print(agents_ans )
         chat_history.append(query)
         chat_history.append(agents_ans)
             
-    print(Fore.RED + "The conversation is over." + Style.RESET_ALL)
+    print("The conversation is over." )
 
 def Multi_turn_chat_with_naive_rag(character_name, model:str="gpt-4.1-mini-2025-04-14"):
     chat = ChatOpenAI(
@@ -939,7 +1001,7 @@ def Multi_turn_chat_with_naive_rag(character_name, model:str="gpt-4.1-mini-2025-
             character_biography = introduction['Content']
             break
     if flag == False:
-        print(Fore.RED + "Can not find the information." + Style.RESET_ALL)
+        print("Can not find the information." )
         sys.exit(1)
     from langchain.document_loaders import PyPDFLoader
     from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -991,11 +1053,11 @@ def Multi_turn_chat_with_naive_rag(character_name, model:str="gpt-4.1-mini-2025-
         user_prompt = f"The one you are chatting with said:<<<{query}>>>"
         current_messages.append(HumanMessage(content=user_prompt))
         agents_ans = chat(current_messages).content
-        print(Fore.GREEN + agents_ans + Style.RESET_ALL)
+        print(agents_ans )
         chat_history.append(query)
         chat_history.append(agents_ans)
             
-    print(Fore.RED + "The conversation is over." + Style.RESET_ALL)
+    print("The conversation is over." )
   
 def main():
     # Initialize argument parser
@@ -1016,17 +1078,17 @@ def main():
 
     # Execute based on method
     if args.method == "rag":
-        print(Fore.RED + f"Starting multi-turn chat with RAG method for {args.character_name}. Type 'exit' to end the chat." + Style.RESET_ALL)
+        print(f"Starting multi-turn chat with RAG method for {args.character_name}. Type 'exit' to end the chat." )
         Multi_turn_chat_with_naive_rag(args.character_name)
     elif args.method == "macm":
-        print(Fore.RED + f"Starting multi-turn chat with MACM method for {args.character_name}. Type 'exit' to end the chat." + Style.RESET_ALL)
+        print(f"Starting multi-turn chat with MACM method for {args.character_name}. Type 'exit' to end the chat." )
         agent = Top_agent(args.character_name, temperature=args.temperature)
         agent.multi_turn_chat()
     elif args.method == "prompt":
-        print(Fore.RED + f"Starting multi-turn chat with prompt method for {args.character_name}. Type 'exit' to end the chat." + Style.RESET_ALL)
+        print(f"Starting multi-turn chat with prompt method for {args.character_name}. Type 'exit' to end the chat." )
         Multi_turn_chat_with_naive_prompt(args.character_name)
     else:
-        print(Fore.RED + f"Starting multi-turn chat with blank model, which does not know anything about the character. Type 'exit' to end the chat." + Style.RESET_ALL)
+        print(f"Starting multi-turn chat with blank model, which does not know anything about the character. Type 'exit' to end the chat." )
         Multi_turn_chat_with_blank_model()
         
     # agent = Top_agent("Mary Jones")

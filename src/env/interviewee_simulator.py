@@ -79,6 +79,7 @@ class IntervieweeSimulator:
             }]
             self.name = re.search(r'^Name:\s*(.+)$', kwargs['profile'], flags=re.MULTILINE).group(1).strip() if self.name is None else self.name
             self.simulator_model = kwargs['simulator_model']
+            self.host = kwargs.get('simulator_host', 'localhost')
             self.port = kwargs['port']
 
         elif self.type == "consistent_llm":
@@ -92,6 +93,7 @@ class IntervieweeSimulator:
             
             self.client_or_model = kwargs['model_path']
             self.simulator_model = kwargs['simulator_model']
+            self.host = kwargs.get('simulator_host', 'localhost')
             self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model_path'])
             self.persona = kwargs['persona']
             self.history = []
@@ -157,7 +159,7 @@ class IntervieweeSimulator:
                     add_generation_prompt=True,
                 )
 
-                if input_ids.shape[1] <= 8192:
+                if input_ids.shape[1] + 1024 <= 8192:
                     break
 
                 # drop oldest assistant-user pair but keep system prompt
@@ -172,7 +174,7 @@ class IntervieweeSimulator:
                 model=self.simulator_model,
                 messages=self.history,
                 reasoning_effort="low",
-                api_base=f"http://localhost:{self.port}/v1",
+                api_base=f"http://{self.host}:{self.port}/v1",
                 max_tokens=1024,
                 temperature=0.9,
                 top_p=0.9,
@@ -208,7 +210,7 @@ class IntervieweeSimulator:
                 model=self.simulator_model,
                 messages=[{"role":"system", "content": self.persona}, {"role":"user", "content": input_message}],
                 reasoning_effort="low",
-                api_base=f"http://localhost:{self.port}/v1",
+                api_base=f"http://{self.host}:{self.port}/v1",
                 max_tokens=1024
             )
             # response = self.tokenizer.decode(output_ids[0][input_ids.shape[-1]:], skip_special_tokens=True)    

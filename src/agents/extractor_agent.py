@@ -18,7 +18,8 @@ class ExtractorAgent(Agent):
             role=kwargs.get('role', "extractor"),
             system_message=kwargs.get('system_message', ""),
             model=kwargs.get('model', "gemini/gemini-2.5-flash"),
-            port=kwargs.get('port', None)
+            port=kwargs.get('port', None),
+            host=kwargs.get('host', 'localhost')
         )
     
     def act(self, message: str) -> Action:
@@ -41,7 +42,7 @@ class ExtractorAgent(Agent):
                 )
                 if self.model.startswith("hosted_vllm/"):
                     assert self.port is not None, "Port must be specified for hosted_vllm models."
-                    completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+                    completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
                 res = get_completion(
                     **completion_kwargs
                 )

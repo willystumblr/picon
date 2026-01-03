@@ -1,12 +1,12 @@
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 from src.agents.base_agent import Agent
 from src.env.interviewee_simulator.simulator_factory import get_interviewee_simulator
 from src.agents.agent_factory import get_agent
 from src.schemas import State, Action, Observation, Turn, ToolOutput, IntervieweeResponse
 from src.tools.address_locator import GoogleGeocodeValidate
 from src.tools.web_search import GoogleClaimSearch
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from src.utils import read_json, write_json, get_completion
 import logging
 from litellm.cost_calculator import completion_cost
@@ -80,9 +80,32 @@ class InterrogationEnv:
         self.repeat_score = 0
         self.repeat_results = []
 
-        # confimation prompt
+        # confimation (for affirmative)
         with open(f"{project_root}/src/agents/prompts/confirmation_prompt.txt") as f:
             self.confirmation_prompt = f.read()
+        self.confirmation_qa_lists = []
+        
+        # evasiveness
+        self.evasive_prompt = open(f"{current_dir}/abstain_analysis_prompt.txt", "r").read()
+        self.evasive_score = 0
+        self.evasive_results = []
+        
+        # affirmative
+        self.affirmative_score = 0
+        self.affirmative_count = 0
+        self.refuted_count = 0
+        self.affirmative_results = []
+        
+        # consistency
+        self.internal_count = 0
+        self.external_count = 0
+        self.internal_conflict = 0
+        self.external_conflict = 0
+        self.internal_plausible = 0
+        self.external_plausible = 0
+        self.internal_conflict_verdicts = []
+        self.external_conflict_verdicts = []
+        self.first_conflict_turn = None
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -247,6 +270,12 @@ class InterrogationEnv:
                         self.agents['evaluator'].update_memory(role="user", content=response.content) ####### 여기 #######
                         self.agents['questioner'].update_memory(role="assistant", content=confirmation_question) ####### 여기 #######
                         self.agents['questioner'].update_memory(role="user", content=response.content) ####### 여기 #######
+
+                        self.confirmation_qa_lists.append({
+                            "question": confirmation_question,
+                            "response": response.content
+                        })
+                    
                     else:
                         logging.info("Confirmation question skipped as per web search agent's decision.")
             else:
@@ -301,43 +330,272 @@ class InterrogationEnv:
             )
             turn = Turn(type='repeat', agent_action=[action], environment_observation=[observation])
             self.state.history.append(turn)
+        if self.interviewee.type == "characterai":
+            asyncio.run(self.interviewee.close())
+        return self.state
+    
+    def evaluate(self):
+        """evaluate the entire interrogation session"""
+        """use threading to parallelize the four evaluation tasks at once"""
+        eval_methods = [
+            self.consistency_eval,
+            self.repeat_eval,
+            self.affirmative_eval,
+            self.evasiveness_eval
+        ]
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(method) for method in eval_methods]
+            # Wait for all to complete
+            for future in futures:
+                future.result()
+    
+    def consistency_eval(self):
+        messages_lists = []
+        user_indices = []
+        for i in range(len(self.agents['evaluator'].memory)):
+            if self.agents['evaluator'].memory[i]['role']=='user':
+                messages_lists.append(self.agents['evaluator'].memory[:i+1])
+                user_indices.append(i)
+        
+        with ThreadPoolExecutor(max_workers=len(messages_lists)) as executor:
+            results = list(executor.map(self.generate_verdict, messages_lists))
+        
+        for idx, (verdict, response_format) in zip(user_indices, results):
+            self.env_cost += completion_cost(verdict) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
+            parsed_verdict = response_format.model_validate_json(verdict.choices[0].message.content)
+            turn_idx, question, user_response = self._find_turn_idx(idx)
+            if parsed_verdict.ground == 'internal':
+                self.internal_count += 1
+                if parsed_verdict.verdict == 'conflict':
+                    self.internal_conflict += 1
+                    self.internal_conflict_verdicts.append({
+                        "turn": turn_idx,
+                        "question": question,
+                        "response": user_response,
+                        "rationale": parsed_verdict.rationale
+                    })
+                    if self.first_conflict_turn is None:
+                        self.first_conflict_turn = turn_idx
+                else:
+                    self.internal_plausible += 1
+            else:
+                self.external_count += 1
+                if parsed_verdict.verdict == 'conflict':
+                    self.external_conflict += 1
+                    self.external_conflict_verdicts.append({
+                        "turn": turn_idx,
+                        "question": question,
+                        "response": user_response,
+                        "rationale": parsed_verdict.rationale
+                    })
+                    if self.first_conflict_turn is None:
+                        self.first_conflict_turn = turn_idx
+                else:
+                    self.external_plausible += 1
             
-            inital_response = self.state.history[i].environment_observation[0].response.content
-            while True:
-                completion_kwargs = dict(
-                    model=self.agents['evaluator'].model,
-                    messages=[
-                        {"role": "system", "content": REPEAT_PROMPT},
-                        {"role": "user", "content": f"Question: {q['question']}\n\nResponse 1: {inital_response}\nResponse 2: {response.content}"}
-                    ],
-                    reasoning_effort="low",
-                )
-                if self.agents['evaluator'].model.startswith("hosted_vllm/"):
-                    assert self.agents['evaluator'].port is not None, "Port must be specified for hosted_vllm models."    
-                    completion_kwargs['api_base'] = f"http://localhost:{self.agents['evaluator'].port}/v1"
-                res = get_completion(**completion_kwargs)
+    
+    def generate_verdict(self, messages: List[Dict[str, Any]]):
+        class EvaluationResponseInternal(BaseModel):
+            verdict: Literal['conflict', 'plausible']  # 'conflict' or 'plausible'
+            rationale: str  # explanation for the verdict
+            ground: Literal['internal'] = Field(description="Ground for the verdict. The verdict is based on the internal context (i.e., the conversation history without external information)")
+
+        class EvaluationResponseExternal(BaseModel):
+            verdict: Literal['conflict', 'plausible']  # 'conflict' or 'plausible'
+            rationale: str  # explanation for the verdict
+            ground: Literal['external'] = Field(description="Ground for the verdict. The verdict is based on external web search results.")
+        
+        if messages[-3]['role']=='tool':
+            response_format = EvaluationResponseExternal
+            ground = "external"
+        else:
+            response_format = EvaluationResponseInternal
+            ground = 'internal'
+        completion_kwargs = dict(
+            model=self.agents['evaluator'].model,
+            #messages=messages[:-1] + [{'role' : messages[-1]['role'] , 'content': messages[-1]['content'] + f"[conflict type] ground: {ground}"}], 
+            messages=messages,
+            temperature=0.7,
+            response_format=response_format
+        )
+        if self.agents['evaluator'].model.startswith("hosted_vllm/"):
+            assert self.agents['evaluator'].port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://localhost:{self.agents['evaluator'].port}/v1"    
+        verdict = get_completion(**completion_kwargs)
+        self.env_cost += completion_cost(verdict) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
+        return verdict, response_format
+    
+    def _find_turn_idx(self, idx) -> int:
+        """find the turn index in self.history corresponding to the idx-th user response in self.evaluator_history"""
+        assert self.agents['evaluator'].memory[idx]['role'] == 'user', "The provided index does not correspond to a user message."
+        user_response = self.agents['evaluator'].memory[idx]['content']
+        for i, turn in enumerate(self.state.history):
+            if turn.type != 'repeat':
+                for env_obs in turn.environment_observation:
+                    if env_obs.observation_type == "interviewee_response":
+                        if env_obs.response.content == user_response:
+                            question = env_obs.response.question
+                            return i, question, user_response
+    
+    def repeat_eval(self):
+        completion_kwargs_list = []
+        get_to_knows = [turn for turn in self.state.history if turn.type == 'get_to_know']
+        repeats = [turn for turn in self.state.history if turn.type == 'repeat']
+        for original, repeat in zip(get_to_knows, repeats):
+            assert original.environment_observation[0].response.question in repeat.environment_observation[0].response.question, "Mismatch in questions between original and repeat."
+            
+            completion_kwargs = dict(
+                model=self.agents['evaluator'].model,
+                messages=[
+                    {"role": "system", "content": REPEAT_PROMPT},
+                    {"role": "user", "content": f"Question: {original.environment_observation[0].response.question}\n\nResponse 1: {original.environment_observation[0].response.content}\nResponse 2: {repeat.environment_observation[0].response.content}"}
+                ],
+                reasoning_effort="low",
+            )
+            if self.agents['evaluator'].model.startswith("hosted_vllm/"):
+                assert self.agents['evaluator'].port is not None, "Port must be specified for hosted_vllm models."    
+                completion_kwargs['api_base'] = f"http://localhost:{self.agents['evaluator'].port}/v1"
+            completion_kwargs_list.append(completion_kwargs)
+        
+        with ThreadPoolExecutor(max_workers=len(completion_kwargs_list)) as executor:
+            results = list(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list))
+        for i, res in enumerate(results):
+            self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
+            judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+            while judge not in ["TRUE", "FALSE"]:
+                logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
+                res = get_completion(**completion_kwargs_list[i])
                 self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
                 judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
-                if judge in ["TRUE", "FALSE"]:
-                    break
-                logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
-            
             self.repeat_results.append({
-                "question": f"Just to clarify, {q['question']}",
-                "original_response": inital_response,
-                "repeated_response": response.content,
+                "question": f"Just to clarify, {get_to_knows[i].environment_observation[0].response.question}",
+                "original_response": get_to_knows[i].environment_observation[0].response.content,
+                "repeated_response": repeats[i].environment_observation[0].response.content,
                 "is_repeat": judge
             })
             self.repeat_score += (judge=='TRUE')
-        self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4)
-        if self.interviewee.type == "characterai":
-            asyncio.run(self.interviewee.close())
-        elif self.interviewee.type == "opencharacter" or self.interviewee.type == "consistent_llm":
-            self.interviewee.clear_model()
-        return self.state
+        self.repeat_score = round(self.repeat_score / len(get_to_knows), 4)
+    
+    def affirmative_eval(self):
+        class OutputSchema(BaseModel):
+            is_affirmative: Literal['true', 'false'] = Field(..., description="Whether the provided response is affirmative.")
+            reason : str = Field(..., description="A brief explanation for the decision.")
+        
+        completion_kwargs_list = []
+        for qa in self.confirmation_qa_lists: 
+            completion_kwargs = dict(
+                model=self.agents['evaluator'].model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You will be given a question and an answer. Determine whether the answer is affirmative (i.e., agrees with or confirms the question). Respond with 'true' or 'false' and provide a brief reason. If the answer is not clearly affirmative or negative (e.g., ambiguous or unclear), respond with 'false'."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {qa['question']}\nAnswer: {qa['response']}"
+                    }
+                ],
+                response_format=OutputSchema,
+            )
+            if self.agents['evaluator'].model.startswith("hosted_vllm/"):
+                assert self.agents['evaluator'].port is not None, "Port must be specified for hosted_vllm models."    
+                completion_kwargs['api_base'] = f"http://localhost:{self.agents['evaluator'].port}/v1"
+            completion_kwargs_list.append(completion_kwargs)
+
+        with ThreadPoolExecutor(max_workers=len(completion_kwargs_list)) as executor:
+            results = list(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list))
+        for i, res in enumerate(results):
+            self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
+            output = res.choices[0].message.content if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+            while output is None:
+                logging.warning(f"Unexpected response for affirmative eval: {output}. Retrying...")
+                res = get_completion(**completion_kwargs_list[i])
+                self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
+                output = res.choices[0].message.content if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+            try:
+                parsed_output = OutputSchema.model_validate_json(output)
+            except Exception as e:
+                logging.error(f"Error parsing output for affirmative eval: {e}")
+                continue
+            self.affirmative_results.append({
+                "question": self.confirmation_qa_lists[i]['question'],
+                "response": self.confirmation_qa_lists[i]['response'],
+                "is_affirmative": parsed_output.is_affirmative,
+                "reason": parsed_output.reason
+            })
+            if parsed_output.is_affirmative == 'true':
+                self.affirmative_score += 1
+                self.affirmative_count += 1
+            else:
+                self.refuted_count += 1
+        self.affirmative_score = round(self.affirmative_score / len(self.confirmation_qa_lists), 4)
+        
+        
+    def evasiveness_eval(self):
+        class OutputSchema(BaseModel):
+            evasiveness: Literal['true', 'partially true', 'false'] = Field(..., description="Whether the provided response is evasive.")
+            reason : str = Field(..., description="A brief explanation for the abstention decision.")
+            evasiveness_type: Literal['none', 'refusal', 'lack info', 'asking back', 'unrelated'] = Field(..., description="The type of abstention (e.g., 'lack info', 'unknown', etc.).")
+            
+        qa_pairs = []
+        for turn in self.state.history:
+            if turn.type != 'repeat':
+                for obs in turn.environment_observation:
+                    if obs.observation_type == "interviewee_response":
+                        qa_pairs.append({
+                            "question": obs.response.question,
+                            "answer": obs.response.content
+                        })
+        completion_kwargs_list = []
+        for qa in qa_pairs:
+            completion_kwargs = dict(
+                model=self.agents['evaluator'].model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": self.evasive_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {qa['question']}\nAnswer: {qa['answer']}"
+                    }
+                ],
+                response_format=OutputSchema,
+            )
+            if self.agents['evaluator'].model.startswith("hosted_vllm/"):
+                assert self.agents['evaluator'].port is not None, "Port must be specified for hosted_vllm models."    
+                completion_kwargs['api_base'] = f"http://localhost:{self.agents['evaluator'].port}/v1"
+            completion_kwargs_list.append(completion_kwargs)
+            
+        with ThreadPoolExecutor(max_workers=len(completion_kwargs_list)) as executor:
+            results = list(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list))
+        for i, res in enumerate(results):
+            self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
+            output = res.choices[0].message.content if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+            while output is None:
+                logging.warning(f"Unexpected response for evasiveness eval: {output}. Retrying...")
+                res = get_completion(**completion_kwargs_list[i])
+                self.env_cost += completion_cost(res) if not self.agents['evaluator'].model.startswith("hosted_vllm/") else 0.0
+                output = res.choices[0].message.content if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+            try:
+                parsed_output = OutputSchema.model_validate_json(output)
+            except Exception as e:
+                logging.error(f"Error parsing output for evasiveness eval: {e}")
+                continue
+            self.evasive_results.append({
+                "question": qa_pairs[i]['question'],
+                "response": qa_pairs[i]['answer'],
+                "evasiveness": parsed_output.evasiveness,
+                "reason": parsed_output.reason,
+                "evasiveness_type": parsed_output.evasiveness_type
+            })
+            if parsed_output.evasiveness == 'true':
+                self.evasive_score += 1
+        self.evasive_score = round(self.evasive_score / len(qa_pairs), 4)
         
     
-    def save_state(self, termination_status: str = "Successfully completed"):
+    def save_state(self, termination_status: str = "Successfully completed", reset_only: bool = False) -> dict:
         """save the current state to a json file"""
         agent_cost = sum(agent.cost for agent in self.agents.values())
         interviewee_cost = self.interviewee.calculate_cost()
@@ -364,18 +622,46 @@ class InterrogationEnv:
             "agent_memory": {
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
-            "repeat":{
-                "repeat_score": self.repeat_score,
-                "repeat_results": self.repeat_results
-            }
         }
+        if not reset_only:
+            self.evaluate()
+            final_result["evaluation"] = {
+                "consistency": {
+                    "internal": {
+                        "total": self.internal_count,
+                        "conflict": self.internal_conflict,
+                        "plausible": self.internal_plausible,
+                        "conflict_verdicts": self.internal_conflict_verdicts
+                    },
+                    "external": {
+                        "total": self.external_count,
+                        "conflict": self.external_conflict,
+                        "plausible": self.external_plausible,
+                        "conflict_verdicts": self.external_conflict_verdicts
+                    },
+                    "first_conflict_turn": self.first_conflict_turn
+                },
+                "repeat": {
+                    "repeat_score": self.repeat_score,
+                    "details": self.repeat_results
+                },
+                "affirmative": {
+                    "affirmative_score": self.affirmative_score,
+                    "affirmative_count": self.affirmative_count,
+                    "refuted_count": self.refuted_count,
+                    "details": self.affirmative_results
+                },
+                "evasiveness": {
+                    "evasive_score": self.evasive_score,
+                    "details": self.evasive_results
+                }
+            }
         # write_json(final_result, path)
         
         logging.info("Cost: (agent):" + ", ".join([f"{agent_name}: ${agent.cost}" for agent_name, agent in self.agents.items()]))
         logging.info(f"Cost: (interviewee): ${interviewee_cost}")
         logging.info(f"Cost: (environment): ${self.env_cost}")
         logging.info(f"Total cost: ${final_result['cost']['total_cost']}, Duration: {final_result['duration']}")
-        logging.info(f"Repeat score: {final_result['repeat']['repeat_score']}")
         return final_result
 
 if __name__ == "__main__":

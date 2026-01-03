@@ -30,5 +30,8 @@ def get_interviewee_simulator(
     elif baseline_name == "consistent_llm":
         from src.env.interviewee_simulator.consistent_llm_simulator import ConsistentLLMSimulator
         return ConsistentLLMSimulator(**kwargs)
+    elif baseline_name == "persona_hub":
+        from src.env.interviewee_simulator.persona_hub_simulator import ConsistentLLMSimulator
+        return PersonaHubSimulator(**kwargs)
     else:
         raise ValueError(f"Unsupported interviewee simulator: {baseline_name}")

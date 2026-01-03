@@ -220,6 +220,15 @@ if __name__ == "__main__":
                 "simulator_host": args.simulator_host,
                 "port": args.simulator_port
             })
+    elif args.baseline_name == "persona_hub":
+        interviewee_kwargs = [{
+            "baseline_name": "persona_hub",
+            "name": input("Enter your name: "),
+            "nhd_model": args.nhd_model,
+            "nhd_port": args.nhd_port,
+            "question_seed": args.question_seed
+        }]
+        
     elif args.baseline_name == "human_interview":
         interviewee_kwargs = [{
             "baseline_name": "human_interview",

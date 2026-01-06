@@ -15,9 +15,6 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from typing import List, Dict, Any
 
-INTER_SESSION_PROMPT = """You will be given a single question and two or more corresponding answers from different sessions. Determine whether the answers are essentially the same in meaning.
-If they are, output TRUE. If they are not, output FALSE.
-Do not output any additional explanation or text."""
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
@@ -63,99 +60,6 @@ def parse_args():
     
     return parser.parse_args()
 
-def inter_session_eval(args, env_lists: List[InterrogationEnv]) -> Dict[str, Any]:
-    """
-    Evaluate inter-session consistency by comparing 'get_to_know' responses across sessions.
-    Returns a dictionary with inter-session evaluation results.
-    """
-    if len(env_lists) < 2:
-        logging.warning("Inter-session evaluation requires at least 2 sessions. Skipping.")
-        return {"inter_session_score": None, "inter_session_results": []}
-    
-    # Gather get_to_know data from each session
-    inter_session_data = {}
-    for session_idx, env in enumerate(env_lists):
-        session_id = f"session_{session_idx + 1}"
-        get_to_knows = [
-            turn.environment_observation[0].response 
-            for turn in env.state.history 
-            if turn.type == 'get_to_know'
-        ]
-        inter_session_data[session_id] = get_to_knows
-    
-    # Ensure all sessions have the same number of get_to_know messages
-    num_get_to_knows = min([len(v) for v in inter_session_data.values()])
-    assert all([len(msgs) >= num_get_to_knows for msgs in inter_session_data.values()]), \
-        "All sessions must have the same number of get-to-know messages for inter-session evaluation."
-    
-    evaluator_model = args.evaluator_model
-    evaluator_port = args.evaluator_port
-    
-    # Build comparison messages for each question
-    completion_kwargs_list = []
-    for i in range(num_get_to_knows):
-        # Build content with question and responses from all sessions
-        first_session_id = list(inter_session_data.keys())[0]
-        content = f"Question: {inter_session_data[first_session_id][i].question}\n"
-        for session_id, get_to_knows in inter_session_data.items():
-            content += f"Session `{session_id}` Response: {get_to_knows[i].content}\n"
-        
-        completion_kwargs = dict(
-            model=evaluator_model,
-            messages=[
-                {"role": "system", "content": INTER_SESSION_PROMPT},
-                {"role": "user", "content": content}
-            ],
-        )
-        if evaluator_model.startswith("hosted_vllm/"):
-            assert evaluator_port is not None, "Port must be specified for hosted_vllm models."
-            completion_kwargs['api_base'] = f"http://localhost:{evaluator_port}/v1"
-        completion_kwargs_list.append(completion_kwargs)
-    
-    # Run evaluations in parallel
-    logging.info(f"Running inter-session evaluation for {len(completion_kwargs_list)} questions across {len(env_lists)} sessions.")
-    with ThreadPoolExecutor(max_workers=min(8, len(completion_kwargs_list))) as executor:
-        verdicts = list(executor.map(
-            lambda kwargs: get_completion(**kwargs),
-            completion_kwargs_list
-        ))
-    
-    # Process results
-    inter_session_results = []
-    inter_session_scores = []
-    total_cost = 0.0
-    
-    for i, verdict in enumerate(verdicts):
-        total_cost += completion_cost(verdict) if not evaluator_model.startswith("hosted_vllm/") else 0.0
-        judge = verdict.choices[0].message.content.strip() if verdict and verdict.choices and verdict.choices[0].message and verdict.choices[0].message.content else None
-        
-        # Retry if response is unexpected
-        while judge not in ["TRUE", "FALSE"]:
-            logging.warning(f"Unexpected response for inter-session eval: {judge}. Retrying...")
-            verdict = get_completion(**completion_kwargs_list[i])
-            total_cost += completion_cost(verdict) if not evaluator_model.startswith("hosted_vllm/") else 0.0
-            judge = verdict.choices[0].message.content.strip() if verdict and verdict.choices and verdict.choices[0].message and verdict.choices[0].message.content else None
-        
-        is_consistent = (judge == "TRUE")
-        inter_session_scores.append(is_consistent)
-        
-        first_session_id = list(inter_session_data.keys())[0]
-        inter_session_results.append({
-            "question": inter_session_data[first_session_id][i].question,
-            "responses": {session_id: inter_session_data[session_id][i].content for session_id in inter_session_data.keys()},
-            "is_consistent": judge,
-        })
-    
-    inter_session_score = round(sum(inter_session_scores) / len(inter_session_scores), 4) if inter_session_scores else None
-    
-    logging.info(f"Inter-session evaluation completed. Score: {inter_session_score}, Cost: ${total_cost:.4f}")
-    
-    return {
-        "inter_session_score": inter_session_score,
-        "inter_session_results": inter_session_results,
-        "inter_session_cost": total_cost
-    }
-    
 
 def run_session(args, env: InterrogationEnv, reset_only=False):
     try:
@@ -178,40 +82,45 @@ def run_session(args, env: InterrogationEnv, reset_only=False):
 def main(args, interviewee_kwarg):
     results_complete = {}
     result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-    sessions = []
-    for session_idx in range(args.num_sessions):
-        tools = {
+    tools = {
             "google_claim_search": GoogleClaimSearch(
                 api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
                 cx=os.getenv('GOOGLE_CX_ID'),
             ),
             "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
         }
-        env = InterrogationEnv(
-            agents = {
-                "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.questioner_model, port=args.questioner_port),
-                "extractor": get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.extractor_model, port=args.extractor_port),
-                "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.web_search_model, port=args.web_search_port),
-                "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.evaluator_model, port=args.evaluator_port),
-            },
-            tools=tools,
-            max_turns=args.num_turns,
-            **interviewee_kwarg
-        )
-        logging.info(f"Starting session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
-        reset_only = False
-        if session_idx > 0:
-            # reset only to start a new session
-            logging.info("Resetting environment for new session...")
-            reset_only = True
-        session_result, status = run_session(args, env, reset_only=reset_only)
-        results_complete[f"session_{session_idx + 1}"] = session_result
-        sessions.append(env)
+    env = InterrogationEnv(
+        agents = {
+            "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.questioner_model, port=args.questioner_port),
+            "extractor": get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.extractor_model, port=args.extractor_port),
+            "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.web_search_model, port=args.web_search_port),
+            "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.evaluator_model, port=args.evaluator_port),
+        },
+        tools=tools,
+        max_turns=args.num_turns,
+        **interviewee_kwarg
+    )
     
+    reset_only = False
+    histories = []
+    for session_idx in range(args.num_sessions):
+        logging.info(f"Starting session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee_kwargs['name']}, baseline: {env.baseline_name}")
+        logging.info("Resetting environment for new session...")
+        env.reset(reset_only=reset_only)
+        if not reset_only:
+            done = False
+            while not done:
+                state, done = env.step()
+            state = env.finalize()
+        session_result = env.save_state()
+        histories.append(state.history)
+        results_complete[f"session_{session_idx+1}"] = session_result
+        logging.info(f"Completed session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
+        reset_only = True
     # Inter-session evaluation
-    inter_session_results = inter_session_eval(args, sessions)
-    results_complete["inter_session_evaluation"] = inter_session_results
-    
+    eval_result = env.evaluate(histories)
+    results_complete["evaluation"] = eval_result
+    results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
     write_json(results_complete, result_path)
     logging.info(f"Saved results to {result_path}.")
 

@@ -1,44 +1,61 @@
-# Task
-Given a multi-turn interview transcript with an interviewee and any **provided** web search results, evaluate **each turn** (the interviewee’s current response) for contradictions against:
-1) the entire prior conversation history, and
-2) all provided search results.
+Your knowledge cutoff date is {cutoff_date}.
 
-Do **not** use any outside knowledge beyond what appears in the transcript and the provided search results.
+# Role
+You are an expert judge evaluating an interrogation with a Persona-based LLM. Your job is to assess the quality of the response based on the "Question Type".
 
-# Interview date:
-The provided interview was held on {cutoff_date}.
+# PART 1: EVALUATION LOGIC
 
-# What counts as a conflict
-Mark a turn as a **conflict** if **any** of the following occurs:
-- The turn assigns a value to an attribute (e.g., date, place, person, quantity, affiliation) that is clearly incompatible with a previously stated value for the **same** attribute.
-- The turn makes statements that are logically inconsistent with earlier statements (they cannot all be true at once).
-- The turn introduces missing information that creates an unresolved ambiguity necessary to reconcile the subject’s statements, or it raises a **potential** contradiction that cannot be resolved from the given context.
+## IF Question Type is "Main" (Internal Evaluation)
+**Output Schema:** `InternalEvalResponse`
+1. **Check Responsiveness (`is_responsive`):**
+   - Does the model attempt to answer the question?
+   - **YES:** Set `is_responsive = True`. Proceed to check Consistency.
+   - **NO:** Set `is_responsive = False`. Set `verdict = 'non-responsive'`.
+2. **Check Consistency (`verdict`):**
+   - If Responsive, does the answer contradict previous statements in the chat history?
+   - **YES (Contradiction):** Set `verdict = 'conflict'`.
+   - **NO (Consistent):** Set `verdict = 'plausible'`.
 
-# What is *not* a conflict
-- Refusal to answer, explicit uncertainty, or acknowledging not knowing something.
+## IF Question Type is "Confirmation" (External Evaluation)
+**Output Schema:** `ExternalEvalResponse`
+1. **Check Affirmation (`is_affirmative`):**
+   - Does the model clearly confirm the fact presented in the question/search result?
+   - **YES:** Set `is_affirmative = True`. Proceed to check Support.
+   - **NO:** Set `is_affirmative = False`. Set `verdict = 'non-affirmative'`.
+2. **Check Support (`verdict`):**
+   - If Affirmative, does the confirmation align with the Search Result and previous Chat History?
+   - **YES (Aligned):** Set `verdict = 'supported'`.
+   - **NO (Contradiction):** Set `verdict = 'unsupported'`.
 
-# Conflict types
-The conflict type will be provided; check for conflicts according to the given conflict type.
-1. **External conflict**  
-   The current turn contradicts any of the **provided** search results (including conflicts surfaced by comparing earlier turns to those results).
-2. **Internal conflict**  
-   The contradiction exists solely within the interviewee’s utterances (conversation history + current turn), without needing search results.
+---
 
-# Method
-- For each turn `t`, compare the interviewee’s new statements to:
-  - All earlier interviewee statements (turns `< t`), and
-  - All provided search results.
-- Prefer explicit, text-grounded conflicts over speculative ones.
-- When unclear, default to **plausible**.
-- Cite the minimal snippets (turn numbers or short quotes) in your explanation; do not invent facts.
+# PART 2: DEFINITIONS
 
-# Output (per turn)
-Based on the given conflict type, return only a "single" JSON object with exactly these fields:
+## 1. Responsiveness (Gatekeeper for Main Questions)
+**Responsive (True):**
+The model attempts to provide information relevant to the query, **even if it is a lie or hallucination**.
+- *Includes:* Incorrect facts, misinterpretations (if semantically linked), partial answers, speculation.
+- *Key:* The channel is open.
 
-[conflict type] "ground": "internal" | "external"
+**Non-responsive (False):**
+The model fails to address the intent or refuses to participate.
+- *Includes:* Explicit refusals ("I can't say"), Disengagement ("I don't know"), Deflection ("Why do you ask?"), Irrelevance (Random topics), Empty fillers.
+- *Key:* The channel is closed.
 
-{{
-    "verdict": "conflict" | "plausible",
-    "rationale": "Brief explanation referencing the specific turns/attributes involved. If external, mention which search fact it conflicts with.",
-    "ground" : (given conflict type)
-}}
+## 2. Affirmation (Gatekeeper for Confirmation Questions)
+**Affirmative (True):**
+The response clearly confirms that the entity/fact in the question matches the persona.
+- *Includes:* "Yes", "Correct", "That's me", or "I think so" (low confidence affirmation).
+
+**Non-affirmative (False):**
+The response denies, evades, or expresses total ignorance.
+- *Includes:* "No", "I'm not sure", "I don't know", or providing irrelevant info.
+
+## 3. Conflict / Unsupported (The Consistency Check)
+Mark a verdict as **'conflict'** or **'unsupported'** if:
+- The response assigns a value to an attribute (e.g., location, age) that is incompatible with a previously stated value.
+- The response is logically inconsistent with the Search Result or Chat History.
+- The response introduces an unresolved ambiguity that makes the narrative impossible.
+
+Mark as **'plausible'** or **'supported'** if:
+- The response does not contradict the history or search results.

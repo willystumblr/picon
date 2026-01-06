@@ -20,6 +20,7 @@ class IntervieweeResponse(BaseModel):
 class ToolOutput(BaseModel):
     tool_call_id: str
     tool_name: str
+    arguments: Dict[str, Any]
     output: str |List | List[Dict] | Any # 웹 검색 결과 등
 
 class Observation(BaseModel):

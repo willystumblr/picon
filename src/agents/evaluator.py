@@ -11,6 +11,7 @@ from src.agents.base_agent import Agent
 from src.utils import get_completion
 from src.schemas import Action, Observation, Turn
 from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 
 litellm.drop_params = True
 
@@ -84,34 +85,129 @@ class EvaluatorAgent(Agent):
             self.memory.append(kwargs) # typically role and content
 
     def __generate_verdict(self, messages: List[Dict[str, Any]]):
-        class InternalEvalResponse(BaseModel):
+        class InternalResponsive(BaseModel):
             is_responsive: bool = Field(..., description="Whether the response is responsive (engaged) to the question")
-            verdict: Literal['conflict', 'plausible', 'non-responsive']
             rationale: str = Field(..., description="The rationale behind the verdict")
 
-        class ExternalEvalResponse(BaseModel):
+        class InternalVerdictResponseFormat(BaseModel):
+            verdict: Literal['conflict', 'plausible']
+            rationale: str = Field(..., description="The rationale behind the verdict")
+            
+        class ExternalAffirmative(BaseModel):
             is_affirmative: bool = Field(..., description="Whether the response affirms the search result")
-            verdict: Literal['supported', 'unsupported', 'non-affirmative']
+            rationale: str = Field(..., description="The rationale behind the verdict")
+        
+        class ExternalVerdictResponseFormat(BaseModel):
+            verdict: Literal['supported', 'rejected']
+            rationale: str = Field(..., description="The rationale behind the verdict")
+        
+        class Verdict(BaseModel):
+            verdict: str = Field(..., description="The verdict of the evaluation")
+            is_responsive: bool | None = Field(None, description="Whether the response is responsive to the question")
+            is_affirmative: bool | None = Field(None, description="Whether the response affirms the search result")
             rationale: str = Field(..., description="The rationale behind the verdict")
         
         if messages[-3]['role']=='tool':
-            response_format = ExternalEvalResponse
+            response_format_step1 = ExternalAffirmative
+            response_format_step2 = ExternalVerdictResponseFormat
+            flag = "affirmative"
         else:
-            response_format = InternalEvalResponse
-
-        completion_kwargs = dict(
+            response_format_step1 = InternalResponsive
+            response_format_step2 = InternalVerdictResponseFormat
+            flag = "responsive"
+        
+        # step 1: determine if responsive/affirmative
+        completion_kwargs_1 = dict(
             model=self.model,
-            messages=messages,
-            temperature=0.7,
-            response_format=response_format
+            messages=messages + [
+                {
+                    "role": "user",
+                    "content": f"Based on the conversation so far, determine whether the latest user response is {flag} to the question asked (i.e., addresses the question asked) or not. "
+                }
+            ],
+            reasoning_effort="low",
+            response_format=response_format_step1
         )
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
-            completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"    
-        verdict = get_completion(**completion_kwargs)
-        self._calculate_cost(verdict)
-        return verdict, response_format
+            completion_kwargs_1['api_base'] = f"http://localhost:{self.port}/v1"
+        response_1 = get_completion(**completion_kwargs_1)
+        self._calculate_cost(response_1)
+        parsed_response_1 = response_format_step1.model_validate_json(response_1.choices[0].message.content)
+        # step 2: generate verdict based on step 1
+        if flag == "responsive":
+            if parsed_response_1.is_responsive:
+                completion_kwargs_2 = dict(
+                    model=self.model,
+                    messages=messages + [
+                        {
+                            "role": "user",
+                            "content": "Based on the conversation so far, determine whether the latest user response is in conflict with or plausible given the previous responses. "
+                        }
+                    ],
+                    reasoning_effort="low",
+                    response_format=response_format_step2
+                )
+            else:
+                # if not responsive, verdict is non-responsive
+                verdict = Verdict(
+                    verdict="non-responsive",
+                    is_responsive=False,
+                    is_affirmative=None,
+                    rationale=parsed_response_1.rationale
+                )
+                return verdict
+        else:  # affirmative
+            if parsed_response_1.is_affirmative:
+                completion_kwargs_2 = dict(
+                    model=self.model,
+                    messages=messages + [
+                        {
+                            "role": "user",
+                            "content": "Based on the conversation so far, determine whether the latest user response is supported by or unsupported by the search results provided. "
+                        }
+                    ],
+                    reasoning_effort="low",
+                    response_format=response_format_step2
+                )
+            else:
+                verdict = Verdict(
+                    verdict="non-affirmative",
+                    is_affirmative=False,
+                    is_responsive=None,
+                    rationale=parsed_response_1.rationale
+                )
+                return verdict
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs_2['api_base'] = f"http://localhost:{self.port}/v1"
+        response_2 = get_completion(**completion_kwargs_2)
+        self._calculate_cost(response_2)
+        parsed_response_2 = response_format_step2.model_validate_json(response_2.choices[0].message.content)
+        
+        verdict = Verdict(
+            verdict=parsed_response_2.verdict,
+            is_responsive=parsed_response_1.is_responsive if flag=="responsive" else None,
+            is_affirmative=parsed_response_1.is_affirmative if flag=="affirmative" else None,
+            rationale=parsed_response_2.rationale
+        )
+        
+        return verdict
 
+    def __verdict_sanity_check(self, verdict: BaseModel) -> bool:
+        """Check if the verdict object has valid fields"""
+        if verdict.verdict in ['conflict', 'plausible', 'non-responsive']:
+            if verdict.is_responsive:
+                return verdict.verdict in ['conflict', 'plausible']
+            else:
+                return verdict.verdict == 'non-responsive'
+        elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']:
+            if verdict.is_affirmative:
+                return verdict.verdict in ['supported', 'rejected']
+            else:
+                return verdict.verdict == 'non-affirmative'
+        return False
+    
     def _find_turn_idx(self, idx: int, history: List[Turn]) -> int:
         """find the turn index in self.history corresponding to the idx-th user response in self.evaluator_history"""
         assert self.memory[idx]['role'] == 'user', "The provided index does not correspond to a user message."
@@ -132,70 +228,72 @@ class EvaluatorAgent(Agent):
             if self.memory[i]['role']=='user':
                 messages_lists.append(self.memory[:i+1])
                 user_indices.append(i)
+        
                 
         with ThreadPoolExecutor(max_workers=len(messages_lists)) as executor:
-            results = list(executor.map(self.__generate_verdict, messages_lists))
+            results = list(tqdm(executor.map(self.__generate_verdict, messages_lists), 
+                               total=len(messages_lists), 
+                               desc="Consistency evaluation"))
         
-        for idx, (verdict, response_format) in zip(user_indices, results):
-            self._calculate_cost(verdict)
-            parsed_verdict = response_format.model_validate_json(verdict.choices[0].message.content)
-            if parsed_verdict.verdict in ['conflict', 'plausible', 'non-responsive']: # internal eval
-                if parsed_verdict.is_responsive:
+        for idx, verdict in zip(user_indices, results):
+            assert self.__verdict_sanity_check(verdict), "Sanity check failed for verdict."
+            if verdict.verdict in ['conflict', 'plausible', 'non-responsive']: # internal eval
+                if verdict.is_responsive:
                     turn_idx, question, user_response = self._find_turn_idx(idx, history)
-                    if parsed_verdict.verdict == 'conflict':
+                    if verdict.verdict == 'conflict':
                         self.results_dict['internal']['conflict']['count'] += 1
                         self.results_dict['internal']['conflict']['details'].append({
                             'turn_index': turn_idx,
                             'question': question,
                             'response': user_response,
-                            'rationale': parsed_verdict.rationale
+                            'rationale': verdict.rationale
                         })
-                    elif parsed_verdict.verdict == 'plausible':
+                    elif verdict.verdict == 'plausible':
                         self.results_dict['internal']['plausible']['count'] += 1
                         self.results_dict['internal']['plausible']['details'].append({
                             'turn_index': turn_idx,
                             'question': question,
                             'response': user_response,
-                            'rationale': parsed_verdict.rationale
+                            'rationale': verdict.rationale
                         })
                 else:
-                    assert parsed_verdict.verdict == 'non-responsive', "If is_responsive is False, verdict must be 'non-responsive'"
+                    assert verdict.verdict == 'non-responsive', "If is_responsive is False, verdict must be 'non-responsive'"
                     turn_idx, question, user_response = self._find_turn_idx(idx, history)
                     self.results_dict['internal']['non-responsive']['count'] += 1
                     self.results_dict['internal']['non-responsive']['details'].append({
                         'turn_index': turn_idx,
                         'question': question,
                         'response': user_response,
-                        'rationale': parsed_verdict.rationale
+                        'rationale': verdict.rationale
                     })
-            elif parsed_verdict.verdict in ['supported', 'unsupported', 'non-affirmative']: # external eval
-                if parsed_verdict.is_affirmative:
+            elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']: # external eval
+                if verdict.is_affirmative:
                     turn_idx, question, user_response = self._find_turn_idx(idx, history)
-                    if parsed_verdict.verdict == 'supported':
+                    if verdict.verdict == 'supported':
                         self.results_dict['external']['supported']['count'] += 1
                         self.results_dict['external']['supported']['details'].append({
                             'turn_index': turn_idx,
                             'question': question,
                             'response': user_response,
-                            'rationale': parsed_verdict.rationale
+                            'rationale': verdict.rationale
                         })
-                    elif parsed_verdict.verdict == 'unsupported':
-                        self.results_dict['external']['unsupported']['count'] += 1
-                        self.results_dict['external']['unsupported']['details'].append({
+                    elif verdict.verdict == 'rejected':
+                        self.results_dict['external']['rejected']['count'] += 1
+                        self.results_dict['external']['rejected']['details'].append({
                             'turn_index': turn_idx,
                             'question': question,
                             'response': user_response,
-                            'rationale': parsed_verdict.rationale
+                            'rationale': verdict.rationale
                         })
                 else:
-                    assert parsed_verdict.verdict == 'non-affirmative', "If is_affirmative is False, verdict must be 'non-affirmative'"
+                    assert verdict.verdict == 'non-affirmative', f"If is_affirmative is False, verdict must be 'non-affirmative': {verdict.verdict}"
                     turn_idx, question, user_response = self._find_turn_idx(idx, history)
                     self.results_dict['external']['non-affirmative']['count'] += 1
                     self.results_dict['external']['non-affirmative']['details'].append({
                         'turn_index': turn_idx,
                         'question': question,
                         'response': user_response,
-                        'rationale': parsed_verdict.rationale
+                        'rationale': verdict.rationale
                     })
             else:
                 raise ValueError("Invalid verdict received from evaluator.")
@@ -243,7 +341,9 @@ class EvaluatorAgent(Agent):
             completion_kwargs_list.append(completion_kwargs)
         
         with ThreadPoolExecutor(max_workers=len(completion_kwargs_list)) as executor:
-            results = list(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list))
+            results = list(tqdm(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list),
+                               total=len(completion_kwargs_list),
+                               desc="Intra-session evaluation"))
         
         for i, res in enumerate(results):
             self._calculate_cost(res) if not self.model.startswith("hosted_vllm/") else 0.0
@@ -296,7 +396,9 @@ class EvaluatorAgent(Agent):
             completion_kwargs_list.append(completion_kwargs)
             
         with ThreadPoolExecutor(max_workers=len(completion_kwargs_list)) as executor:
-            results = list(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list))
+            results = list(tqdm(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list),
+                               total=len(completion_kwargs_list),
+                               desc="Inter-session evaluation"))
         
         for i, res in enumerate(results):
             self._calculate_cost(res)
@@ -324,7 +426,7 @@ class EvaluatorAgent(Agent):
             futures.append(executor.submit(self.intra_session_eval, main_history))
             if len(histories) > 1:
                 futures.append(executor.submit(self.inter_session_eval, histories))
-            for future in futures:
+            for future in tqdm(futures, desc="Overall evaluation progress", total=len(futures)):
                 future.result()  # wait for all to complete
         end_time = time.time()
         logging.info(f"Evaluation completed in {end_time - start_time:.2f} seconds.")

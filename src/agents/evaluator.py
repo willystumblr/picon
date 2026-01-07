@@ -48,7 +48,7 @@ class EvaluatorAgent(Agent):
                     "count": 0,
                     "details": []
                 },
-                'unsupported': {
+                'rejected': {
                     "count": 0,
                     "details": []
                 },
@@ -164,7 +164,7 @@ class EvaluatorAgent(Agent):
                     messages=messages + [
                         {
                             "role": "user",
-                            "content": "Based on the conversation so far, determine whether the latest user response is supported by or unsupported by the search results provided. "
+                            "content": "Based on the conversation so far, determine whether the latest user response is supported by or rejected by the search results provided. "
                         }
                     ],
                     reasoning_effort="low",
@@ -310,10 +310,10 @@ class EvaluatorAgent(Agent):
             internal_score = 0.0
         self.results_dict['internal']['score'] = internal_score
         # External score: 2 * supported ratio * affirmative ratio / (supported ratio + affirmative ratio)
-        total_external = self.results_dict['external']['supported']['count'] + self.results_dict['external']['unsupported']['count'] + self.results_dict['external']['non-affirmative']['count']
+        total_external = self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count'] + self.results_dict['external']['non-affirmative']['count']
         supported_ratio = (self.results_dict['external']['supported']['count'] / 
-                           (self.results_dict['external']['supported']['count'] + self.results_dict['external']['unsupported']['count'])) if (self.results_dict['external']['supported']['count'] + self.results_dict['external']['unsupported']['count']) > 0 else 0.0
-        affirmative_ratio = ((self.results_dict['external']['supported']['count'] + self.results_dict['external']['unsupported']['count']) / total_external) if total_external > 0 else 0.0
+                           (self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count'])) if (self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count']) > 0 else 0.0
+        affirmative_ratio = ((self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count']) / total_external) if total_external > 0 else 0.0
         if supported_ratio + affirmative_ratio > 0:
             external_score = 2 * supported_ratio * affirmative_ratio / (supported_ratio + affirmative_ratio)
         else:

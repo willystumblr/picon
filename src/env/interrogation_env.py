@@ -623,6 +623,9 @@ class InterrogationEnv:
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
         }
+        if 'simulator_model' in self.interviewee.__dict__:
+            final_result["interviewee_info"]["simulator_model"] = self.interviewee.simulator_model
+            
         if not reset_only:
             self.evaluate()
             final_result["evaluation"] = {

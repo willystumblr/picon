@@ -22,7 +22,7 @@ Do not output any additional explanation or text."""
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
     # Model selection
-    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview', 'naive_human_simulacra'])
+    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview', 'naive_human_simulacra', 'persona_hub'])
     parser.add_argument('--questioner_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the questioner.')
     parser.add_argument('--extractor_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the extractor.')
     parser.add_argument('--web_search_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the web search agent.')
@@ -247,7 +247,7 @@ if __name__ == "__main__":
     elif args.baseline_name == "opencharacter":
         dataset = load_dataset("xywang1/OpenCharacter", "Synthetic-Character", split="train")
         if args.do_sample:
-            dataset = dataset.shuffle(seed=args.seed).select(range(10))
+            dataset = dataset.shuffle(seed=args.seed).select(range(12))
         for data in dataset:
             name_match = re.match(r"Name:\s(.*)\n",  data['character'])
             if not name_match:
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         if args.do_sample:
             import random
             random.seed(args.seed)
-            dataset = random.sample(dataset, k=10)
+            dataset = random.sample(dataset, k=15)
         for data in dataset:
             interviewee_kwargs.append({
                 "baseline_name": "consistent_llm",
@@ -289,13 +289,27 @@ if __name__ == "__main__":
                 "port": args.simulator_port
             })
     elif args.baseline_name == "persona_hub":
-        interviewee_kwargs = [{
-            "baseline_name": "persona_hub",
-            "name": input("Enter your name: "),
-            "nhd_model": args.nhd_model,
-            "nhd_port": args.nhd_port,
-            "question_seed": args.question_seed
-        }]
+        #dataset = load_dataset("proj-persona/PersonaHub", "persona", split="train")
+        dataset = read_jsonl("src/env/personas/persona_hub/named_personas_with_key.jsonl")
+        # if args.do_sample:
+        #     dataset = dataset.shuffle(seed=args.seed).select(range(10))
+        if args.do_sample:
+            import random
+            random.seed(args.seed)
+            dataset = random.sample(dataset, k=10)
+        for data in dataset:
+            data['persona'] = data['persona'][0].lower() + data['persona'][1:] if len(data['persona']) > 1 else data['persona'].lower()
+            interviewee_kwargs.append({
+                "baseline_name": "persona_hub",
+                "persona": data['persona'],
+                "name" : data['name'],
+                "nhd_model": args.nhd_model,
+                "nhd_port": args.nhd_port,
+                "question_seed": args.question_seed,
+                "simulator_model": args.simulator_model,
+                "simulator_host": args.simulator_host,
+                "port": args.simulator_port
+            })
         
     elif args.baseline_name == "human_interview":
         interviewee_kwargs = [{

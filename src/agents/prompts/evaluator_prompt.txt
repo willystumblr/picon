@@ -10,7 +10,7 @@ You are an expert judge evaluating an interrogation with a Persona-based LLM. Yo
 1. **Check Responsiveness (`is_responsive`):**
    - Does the model attempt to answer the question?
    - **YES:** Set `is_responsive = True`. Proceed to check Consistency.
-   - **NO:** Set `is_responsive = False`. Set `verdict = 'non-responsive'`.
+   - **NO:** Set `is_responsive = False`.
 2. **Check Consistency (`verdict`):**
    - If Responsive, does the answer contradict previous statements in the chat history?
    - **YES (Contradiction):** Set `verdict = 'conflict'`.
@@ -21,11 +21,11 @@ You are an expert judge evaluating an interrogation with a Persona-based LLM. Yo
 1. **Check Affirmation (`is_affirmative`):**
    - Does the model clearly confirm the fact presented in the question/search result?
    - **YES:** Set `is_affirmative = True`. Proceed to check Support.
-   - **NO:** Set `is_affirmative = False`. Set `verdict = 'non-affirmative'`.
+   - **NO:** Set `is_affirmative = False`.
 2. **Check Support (`verdict`):**
    - If Affirmative, does the confirmation align with the Search Result and previous Chat History?
    - **YES (Aligned):** Set `verdict = 'supported'`.
-   - **NO (Contradiction):** Set `verdict = 'unsupported'`.
+   - **NO (Contradiction):** Set `verdict = 'rejected'`.
 
 ---
 
@@ -51,8 +51,8 @@ The response clearly confirms that the entity/fact in the question matches the p
 The response denies, evades, or expresses total ignorance.
 - *Includes:* "No", "I'm not sure", "I don't know", or providing irrelevant info.
 
-## 3. Conflict / Unsupported (The Consistency Check)
-Mark a verdict as **'conflict'** or **'unsupported'** if:
+## 3. Conflict / Rejected (The Consistency Check)
+Mark a verdict as **'conflict'** or **'rejected'** if:
 - The response assigns a value to an attribute (e.g., location, age) that is incompatible with a previously stated value.
 - The response is logically inconsistent with the Search Result or Chat History.
 - The response introduces an unresolved ambiguity that makes the narrative impossible.

@@ -31,6 +31,7 @@ class InterrogationEnv:
         max_turns: int = 20,
         question_path: str = "src/env/wvs_orthogonal_questions.json",
         instruction_path: str = "src/env/interrogation_instruct.txt",
+        result_data=None,
         **kwargs
         ):
         
@@ -48,28 +49,33 @@ class InterrogationEnv:
                 "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model='gemini/gemini-2.5-flash', port=None),
             }
         self.agents = agents
-        if 'web_search' in self.agents and not self.tools:
-            logging.warning("No tools provided for web search agent.")
-        if 'web_search' in self.agents and not self.agents['web_search'].tools:
-            logging.info("Setting web search agent tools from environment.")
-            self.agents['web_search'].tools = [tool.get_info() for tool in self.tools.values()]
         
-        self.baseline_name = baseline_name
-        self.interviewee_kwargs = kwargs
-        
-        self.max_turns = max_turns
-        questions = read_json(question_path)
-        local_rng.shuffle(questions)
-        self.predefined_questions = questions
-        self.instruction = open(instruction_path).read()
-        self.confirmation_prompt = open(f"{project_root}/src/agents/prompts/confirmation_prompt.txt").read()
-        self.env_cost = 0.0
+        if not result_data : 
+            if 'web_search' in self.agents and not self.tools:
+                logging.warning("No tools provided for web search agent.")
+            if 'web_search' in self.agents and not self.agents['web_search'].tools:
+                logging.info("Setting web search agent tools from environment.")
+                self.agents['web_search'].tools = [tool.get_info() for tool in self.tools.values()]
+            
+            self.baseline_name = baseline_name
+            self.interviewee_kwargs = kwargs
+            
+            self.max_turns = max_turns
+            questions = read_json(question_path)
+            local_rng.shuffle(questions)
+            self.predefined_questions = questions
+            self.instruction = open(instruction_path).read()
+            self.confirmation_prompt = open(f"{project_root}/src/agents/prompts/confirmation_prompt.txt").read()
+            self.env_cost = 0.0
 
-        self.cutoff_date = time.strftime("%B %d, %Y")
-        self.agents['questioner'].set_cutoff_date(self.cutoff_date)
-        self.agents['web_search'].set_cutoff_date(self.cutoff_date)
-        self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
-        self.instruction = self.instruction.format(cutoff_date=self.cutoff_date)
+            self.cutoff_date = time.strftime("%B %d, %Y")
+            self.agents['questioner'].set_cutoff_date(self.cutoff_date)
+            self.agents['web_search'].set_cutoff_date(self.cutoff_date)
+            self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
+            self.instruction = self.instruction.format(cutoff_date=self.cutoff_date)
+        else:
+            self.cutoff_date = result_data['session_1']["interview_date"]
+            self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -312,7 +318,7 @@ class InterrogationEnv:
         assert isinstance(eval_action.content, dict), "Evaluator response must be a dict."
         ### log the evaluation results key by key
         for key, value in eval_action.content.items():
-            logging.info(f"[EVALUATION] {key}: {value}")
+            logging.info(f"[EVALUATION] {key}: {value}\n")
         return eval_action.content
     
     def save_state(self, termination_status: str = "Successfully completed") -> dict:

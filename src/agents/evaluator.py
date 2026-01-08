@@ -268,8 +268,9 @@ class EvaluatorAgent(Agent):
         if idx == user_indices[-1]: # all abstained
             return # nothing to evaluate
         elif idx > user_indices[0]:
-            user_indices = user_indices[user_indices.index(idx)+1:] # dropping all prior abstained user messages, also droping the first non-abstained message since no prior context
+             # dropping all prior abstained user messages, also droping the first non-abstained message since no prior context
             messages_lists = messages_lists[messages_lists.index(messages_lists[user_indices.index(idx)])+1:]
+            user_indices = user_indices[user_indices.index(idx)+1:]
             abstain_results = abstain_results[abstain_results.index(parsed_response)+1:]
         else:
             user_indices.pop(0)  # remove the first user message (no prior context for consistency)

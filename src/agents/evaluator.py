@@ -9,7 +9,7 @@ import json
 import time
 from src.agents.base_agent import Agent
 from src.utils import get_completion
-from src.schemas import Action, Observation, Turn
+from src.schemas import Action, Observation, Turn, ToolOutput
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
@@ -138,7 +138,7 @@ class EvaluatorAgent(Agent):
         parsed_response = response_format.model_validate_json(response_1.choices[0].message.content)
         return parsed_response
     
-    def __generate_verdict(self, messages: List[Dict[str, Any]], abstain_response: BaseModel):
+    def __generate_verdict(self, conversation_log: str, abstain_response: BaseModel, flag: str):
         class InternalVerdictResponseFormat(BaseModel):
             verdict: Literal['conflict', 'plausible']
             rationale: str = Field(..., description="The rationale behind the verdict")
@@ -153,22 +153,18 @@ class EvaluatorAgent(Agent):
             is_affirmative: bool | None = Field(None, description="Whether the response affirms the search result")
             rationale: str = Field(..., description="The rationale behind the verdict")
         
-        if messages[-3]['role']=='tool':
+        if flag == "affirmative":
             response_format = ExternalVerdictResponseFormat
-            flag = "affirmative"
         else:
             response_format = InternalVerdictResponseFormat
-            flag = "cooperative"
         
         if flag == "cooperative":  # responsive
             if not abstain_response.abstain:
                 completion_kwargs_2 = dict(
                     model=self.model,
-                    messages=messages + [
-                        {
-                            "role": "user",
-                            "content": "Based on the conversation so far, determine whether the latest user response is in conflict with or plausible given the previous responses. "
-                        }
+                    messages=[
+                        {"role": "system", "content": self.memory[0]['content']},
+                        {"role": "user", "content": conversation_log + "\n\nBased on the conversation so far, determine whether the latest user response is in conflict with or plausible given the previous responses."}
                     ],
                     reasoning_effort="low",
                     response_format=response_format
@@ -185,11 +181,9 @@ class EvaluatorAgent(Agent):
             if abstain_response.is_affirmative:
                 completion_kwargs_2 = dict(
                     model=self.model,
-                    messages=messages + [
-                        {
-                            "role": "user",
-                            "content": "Based on the conversation so far, determine whether the latest user response is supported by or rejected by the search results provided. "
-                        }
+                    messages=[
+                        {"role": "system", "content": self.memory[0]['content']},
+                        {"role": "user", "content": conversation_log + "\n\nBased on the conversation so far, determine whether the latest user response is supported by or rejected by the search results provided."}
                     ],
                     reasoning_effort="low",
                     response_format=response_format
@@ -232,61 +226,153 @@ class EvaluatorAgent(Agent):
                 return verdict.verdict == 'non-affirmative'
         return False
     
-    def _find_turn_idx(self, idx: int, history: List[Turn]) -> int:
-        """find the turn index in self.history corresponding to the idx-th user response in self.evaluator_history"""
-        assert self.memory[idx]['role'] == 'user', "The provided index does not correspond to a user message."
-        user_response = self.memory[idx]['content']
-        for i, turn in enumerate(history):
-            if turn.type != 'repeat':
-                for env_obs in turn.environment_observation:
-                    if env_obs.observation_type == "interviewee_response":
-                        if env_obs.response.content == user_response and env_obs.response.question == self.memory[idx - 1]['content']:
-                            question = env_obs.response.question
-                            return i, question, user_response
+    def _extract_tool_output_str(self, tool_output: 'ToolOutput') -> str:
+        """Extract tool output string including claims and output."""
+        claims_str = ""
+        if tool_output.arguments and 'claims' in tool_output.arguments:
+            claims = tool_output.arguments['claims']
+            if claims:
+                claims_str = "Claims: " + "; ".join(claims) + "\n"
+        output_str = f"Output: {tool_output.output}"
+        return claims_str + output_str
 
     def consistency_eval(self, history: List[Turn]):
-        messages_lists = []
-        user_indices = []
+        """
+        Evaluate consistency using history directly instead of evaluator's memory.
         
-        for i in range(len(self.memory)):
-            if self.memory[i]['role']=='user':
-                messages_lists.append(self.memory[:i+1])
-                user_indices.append(i)
+        For each turn in history:
+        - First element of environment_observation is for internal/cooperative evaluation
+        - Subsequent interviewee_response elements are for external/affirmative evaluation
+        - Tool outputs are matched to confirmation responses by index
+        """
+        # Filter out repeat turns
+        non_repeat_turns = [turn for turn in history if turn.type != 'repeat']
         
-        qa_pairs = [{"question": self.memory[i-1]['content'], "response": self.memory[i]['content'], "flag": "affirmative" if self.memory[i-2]['role']=='tool' else "cooperative"} for i in user_indices]
+        if not non_repeat_turns:
+            return  # nothing to evaluate
+        
+        # Build evaluation items from history
+        # Each item contains: turn_idx, question, response, flag, conversation_log (accumulated)
+        eval_items = []
+        conversation_log = "Conversation Log:\n\n"
+        
+        for turn_idx, turn in enumerate(non_repeat_turns):
+            env_obs = turn.environment_observation
+            if not env_obs:
+                continue
+            
+            # First observation is always the target of internal/cooperative evaluation
+            first_obs = env_obs[0]
+            if first_obs.observation_type == "interviewee_response" and first_obs.response:
+                question = first_obs.response.question
+                response = first_obs.response.content
+                
+                # Add to eval items (internal/cooperative)
+                eval_items.append({
+                    'turn_idx': turn_idx,
+                    'question': question,
+                    'response': response,
+                    'flag': 'cooperative',
+                    'conversation_log': conversation_log  # log up to this point (not including current)
+                })
+                
+                # Update conversation log with this Q&A
+                conversation_log += f"Q: {question}\nA: {response}\n\n"
+            
+            # Collect tool outputs from this turn
+            tool_outputs = []
+            for obs in env_obs:
+                if obs.observation_type == "tool_output" and obs.tool_output:
+                    tool_outputs.extend(obs.tool_output)
+            
+            # Process subsequent interviewee_responses (confirmation questions) for external/affirmative evaluation
+            # These correspond to tool_outputs by index
+            confirmation_responses = []
+            for obs in env_obs[1:]:  # skip first observation
+                if obs.observation_type == "interviewee_response" and obs.response:
+                    confirmation_responses.append(obs)
+            
+            # Match tool outputs to confirmation responses by index
+            for i, tool_output in enumerate(tool_outputs):
+                tool_output_str = self._extract_tool_output_str(tool_output)
+                
+                # Add tool output to conversation log
+                conversation_log += f"Tool Output:\n{tool_output_str}\n\n"
+                
+                # Check if there's a matching confirmation response
+                if i < len(confirmation_responses):
+                    conf_obs = confirmation_responses[i]
+                    conf_question = conf_obs.response.question
+                    conf_response = conf_obs.response.content
+                    
+                    # Add to eval items (external/affirmative)
+                    eval_items.append({
+                        'turn_idx': turn_idx,
+                        'question': conf_question,
+                        'response': conf_response,
+                        'flag': 'affirmative',
+                        'conversation_log': conversation_log  # log up to this point (not including current)
+                    })
+                    
+                    # Update conversation log with this confirmation Q&A
+                    conversation_log += f"Q: {conf_question}\nA: {conf_response}\n\n"
+                # If no matching confirmation question, skip evaluation for this tool output
+        
+        if not eval_items:
+            return  # nothing to evaluate
+        
+        # Build qa_pairs for abstain evaluation
+        qa_pairs = [{"question": item['question'], "response": item['response'], "flag": item['flag']} for item in eval_items]
         
         with ThreadPoolExecutor(max_workers=16) as executor:
             abstain_results = list(tqdm(executor.map(self.__generate_abstain, qa_pairs), 
-                                       total=len(messages_lists), 
+                                       total=len(qa_pairs), 
                                        desc="Abstain evaluation"))
         
-        # find the first user indices where not abstaining
-        for idx, parsed_response in zip(user_indices, abstain_results):
-            if (qa_pairs[0]['flag']=='cooperative' and not parsed_response.abstain) or (qa_pairs[0]['flag']=='affirmative' and parsed_response.is_affirmative):
+        # Find the first item where not abstaining
+        first_non_abstain_idx = None
+        for i, (item, parsed_response) in enumerate(zip(eval_items, abstain_results)):
+            if item['flag'] == 'cooperative' and not parsed_response.abstain:
+                first_non_abstain_idx = i
                 break
-                
-        if idx == user_indices[-1]: # all abstained
-            return # nothing to evaluate
-        elif idx > user_indices[0]:
-             # dropping all prior abstained user messages, also droping the first non-abstained message since no prior context
-            messages_lists = messages_lists[messages_lists.index(messages_lists[user_indices.index(idx)])+1:]
-            user_indices = user_indices[user_indices.index(idx)+1:]
-            abstain_results = abstain_results[abstain_results.index(parsed_response)+1:]
-        else:
-            user_indices.pop(0)  # remove the first user message (no prior context for consistency)
-            messages_lists.pop(0)
-            abstain_results.pop(0)
-                
+            elif item['flag'] == 'affirmative' and parsed_response.is_affirmative:
+                first_non_abstain_idx = i
+                break
+        
+        if first_non_abstain_idx is None:
+            return  # all abstained, nothing to evaluate
+        
+        # Drop all prior items and the first non-abstained item (no prior context for consistency)
+        if first_non_abstain_idx == len(eval_items) - 1:
+            return  # only the last item is non-abstaining, nothing to evaluate
+        
+        # Start from the item after the first non-abstaining one
+        eval_items = eval_items[first_non_abstain_idx + 1:]
+        abstain_results = abstain_results[first_non_abstain_idx + 1:]
+        qa_pairs = qa_pairs[first_non_abstain_idx + 1:]
+        
+        if not eval_items:
+            return  # nothing left to evaluate
+        
+        # Generate verdicts using conversation logs and flags
+        def generate_verdict_wrapper(args):
+            item, abstain_result = args
+            return self.__generate_verdict(item['conversation_log'], abstain_result, item['flag'])
+        
         with ThreadPoolExecutor(max_workers=16) as executor:
-            results = list(tqdm(executor.map(self.__generate_verdict, messages_lists, abstain_results), 
-                               total=len(messages_lists), 
+            results = list(tqdm(executor.map(generate_verdict_wrapper, zip(eval_items, abstain_results)), 
+                               total=len(eval_items), 
                                desc="Consistency evaluation"))
         
-        for idx, verdict in zip(user_indices, results):
+        # Process results
+        for item, verdict in zip(eval_items, results):
             assert self.__verdict_sanity_check(verdict), "Sanity check failed for verdict."
-            if verdict.verdict in ['conflict', 'plausible', 'uncooperative']: # internal eval
+            turn_idx = item['turn_idx']
+            question = item['question']
+            user_response = item['response']
+            
+            if verdict.verdict in ['conflict', 'plausible', 'uncooperative']:  # internal eval
                 if verdict.is_cooperative:
-                    turn_idx, question, user_response = self._find_turn_idx(idx, history)
                     if verdict.verdict == 'conflict':
                         self.results_dict['internal']['conflict']['count'] += 1
                         self.results_dict['internal']['conflict']['details'].append({
@@ -305,7 +391,6 @@ class EvaluatorAgent(Agent):
                         })
                 else:
                     assert verdict.verdict == 'uncooperative', "If is_cooperative is False, verdict must be 'uncooperative'"
-                    turn_idx, question, user_response = self._find_turn_idx(idx, history)
                     self.results_dict['internal']['uncooperative']['count'] += 1
                     self.results_dict['internal']['uncooperative']['details'].append({
                         'turn_index': turn_idx,
@@ -313,9 +398,8 @@ class EvaluatorAgent(Agent):
                         'response': user_response,
                         'rationale': verdict.rationale
                     })
-            elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']: # external eval
+            elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']:  # external eval
                 if verdict.is_affirmative:
-                    turn_idx, question, user_response = self._find_turn_idx(idx, history)
                     if verdict.verdict == 'supported':
                         self.results_dict['external']['supported']['count'] += 1
                         self.results_dict['external']['supported']['details'].append({
@@ -334,7 +418,6 @@ class EvaluatorAgent(Agent):
                         })
                 else:
                     assert verdict.verdict == 'non-affirmative', f"If is_affirmative is False, verdict must be 'non-affirmative': {verdict.verdict}"
-                    turn_idx, question, user_response = self._find_turn_idx(idx, history)
                     self.results_dict['external']['non-affirmative']['count'] += 1
                     self.results_dict['external']['non-affirmative']['details'].append({
                         'turn_index': turn_idx,

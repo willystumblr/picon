@@ -23,12 +23,30 @@ class EvaluatorAgent(Agent):
             model=kwargs.get('model', "gemini/gemini-2.5-flash"),
             port=kwargs.get('port', None)
         )
+        current_dir = os.path.dirname(os.path.abspath(__file__)) 
         self.REPEAT_PROMPT = ("You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning. "
                               "If they are, output TRUE. If they are not, output FALSE. "
                               "Do not output any additional explanation or text.")
+        self.abstain_prompt = open(f"{current_dir}/prompts/abstain.txt").read()
+        
+        self.affirmative_prompt = (
+            "Your task is to evaluate whether the interviewee's response affirms the search results provided.\n"
+            "An affirmative response should clearly confirm the fact presented in the question/search result.\n"
+            "**Affirmative (True):**\n"
+            "The response clearly confirms the fact.\n"
+            "- *Includes:* \"Yes\", \"Correct\", \"That's me\".\n\n"
+            "**Non-Affirmative (False):**\n"
+            "The response does not confirm the fact, is vague, or indicates uncertainty.\n"
+            "- *Includes:* \"I don't know\", \"Maybe\", \"Not sure\", irrelevant answers.\n\n"
+            "Please strictly follow the guidelines above when making your judgment."
+        )
         self.results_dict = {
             'internal': {
-                'score': 0.0,
+                'score': {
+                    "harmonic_mean": 0.0,
+                    "responsiveness_score": 0.0,
+                    "consistency_score": 0.0         
+                },
                 'conflict': {
                     "count": 0,
                     "details": []
@@ -37,13 +55,17 @@ class EvaluatorAgent(Agent):
                     "count": 0,
                     "details": []
                 },
-                'non-responsive': {
+                'uncooperative': {
                     "count": 0,
                     "details": []
                 },
             },
             'external': {
-                'score': 0.0,
+                'score': {
+                    "harmonic_mean": 0.0,
+                    "affirmativeness_score": 0.0,
+                    "consistency_score": 0.0,
+                },
                 'supported': {
                     "count": 0,
                     "details": []
@@ -84,59 +106,62 @@ class EvaluatorAgent(Agent):
         else:
             self.memory.append(kwargs) # typically role and content
 
-    def __generate_verdict(self, messages: List[Dict[str, Any]]):
+    def __generate_abstain(self, qa_pair: Dict[str, str]):
         class InternalResponsive(BaseModel):
-            is_responsive: bool = Field(..., description="Whether the response is responsive (engaged) to the question")
+            abstain: bool = Field(..., description="Whether the response is abstaining from answering")
             rationale: str = Field(..., description="The rationale behind the verdict")
-
-        class InternalVerdictResponseFormat(BaseModel):
-            verdict: Literal['conflict', 'plausible']
-            rationale: str = Field(..., description="The rationale behind the verdict")
+            abstain_type: Literal["none", "refusal", "lack_info", "asking_back", "unrelated"] | None = Field(None, description="Type of abstention if abstain is True")
             
         class ExternalAffirmative(BaseModel):
             is_affirmative: bool = Field(..., description="Whether the response affirms the search result")
             rationale: str = Field(..., description="The rationale behind the verdict")
         
-        class ExternalVerdictResponseFormat(BaseModel):
-            verdict: Literal['supported', 'rejected']
-            rationale: str = Field(..., description="The rationale behind the verdict")
-        
-        class Verdict(BaseModel):
-            verdict: str = Field(..., description="The verdict of the evaluation")
-            is_responsive: bool | None = Field(None, description="Whether the response is responsive to the question")
-            is_affirmative: bool | None = Field(None, description="Whether the response affirms the search result")
-            rationale: str = Field(..., description="The rationale behind the verdict")
-        
-        if messages[-3]['role']=='tool':
-            response_format_step1 = ExternalAffirmative
-            response_format_step2 = ExternalVerdictResponseFormat
-            flag = "affirmative"
+        if qa_pair['flag']=='affirmative':
+            response_format = ExternalAffirmative
         else:
-            response_format_step1 = InternalResponsive
-            response_format_step2 = InternalVerdictResponseFormat
-            flag = "responsive"
-        
-        # step 1: determine if responsive/affirmative
+            response_format = InternalResponsive
+            
         completion_kwargs_1 = dict(
             model=self.model,
-            messages=messages + [
-                {
-                    "role": "user",
-                    "content": f"Based on the conversation so far, determine whether the latest user response is {flag} to the question asked (i.e., addresses the question asked) or not. "
-                }
+            messages=[
+                {"role": "system", "content": self.abstain_prompt} if qa_pair['flag']=="cooperative" else {"role": "system", "content": self.affirmative_prompt},
+                {"role": "user", "content": "Question: " + qa_pair['question'] + "\n\nAnswer: " + qa_pair['response']}
             ],
             reasoning_effort="low",
-            response_format=response_format_step1
+            response_format=response_format
         )
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
             completion_kwargs_1['api_base'] = f"http://localhost:{self.port}/v1"
         response_1 = get_completion(**completion_kwargs_1)
         self._calculate_cost(response_1)
-        parsed_response_1 = response_format_step1.model_validate_json(response_1.choices[0].message.content)
-        # step 2: generate verdict based on step 1
-        if flag == "responsive":
-            if parsed_response_1.is_responsive:
+        parsed_response = response_format.model_validate_json(response_1.choices[0].message.content)
+        return parsed_response
+    
+    def __generate_verdict(self, messages: List[Dict[str, Any]], abstain_response: BaseModel):
+        class InternalVerdictResponseFormat(BaseModel):
+            verdict: Literal['conflict', 'plausible']
+            rationale: str = Field(..., description="The rationale behind the verdict")
+            
+        class ExternalVerdictResponseFormat(BaseModel):
+            verdict: Literal['supported', 'rejected']
+            rationale: str = Field(..., description="The rationale behind the verdict")
+        
+        class Verdict(BaseModel):
+            verdict: str = Field(..., description="The verdict of the evaluation")
+            is_cooperative: bool | None = Field(None, description="Whether the response is cooperative to the question")
+            is_affirmative: bool | None = Field(None, description="Whether the response affirms the search result")
+            rationale: str = Field(..., description="The rationale behind the verdict")
+        
+        if messages[-3]['role']=='tool':
+            response_format = ExternalVerdictResponseFormat
+            flag = "affirmative"
+        else:
+            response_format = InternalVerdictResponseFormat
+            flag = "cooperative"
+        
+        if flag == "cooperative":  # responsive
+            if not abstain_response.abstain:
                 completion_kwargs_2 = dict(
                     model=self.model,
                     messages=messages + [
@@ -146,19 +171,18 @@ class EvaluatorAgent(Agent):
                         }
                     ],
                     reasoning_effort="low",
-                    response_format=response_format_step2
+                    response_format=response_format
                 )
             else:
-                # if not responsive, verdict is non-responsive
                 verdict = Verdict(
-                    verdict="non-responsive",
-                    is_responsive=False,
+                    verdict="uncooperative",
+                    is_cooperative=False,
                     is_affirmative=None,
-                    rationale=parsed_response_1.rationale
+                    rationale=abstain_response.rationale
                 )
                 return verdict
         else:  # affirmative
-            if parsed_response_1.is_affirmative:
+            if abstain_response.is_affirmative:
                 completion_kwargs_2 = dict(
                     model=self.model,
                     messages=messages + [
@@ -168,14 +192,14 @@ class EvaluatorAgent(Agent):
                         }
                     ],
                     reasoning_effort="low",
-                    response_format=response_format_step2
+                    response_format=response_format
                 )
             else:
                 verdict = Verdict(
                     verdict="non-affirmative",
                     is_affirmative=False,
-                    is_responsive=None,
-                    rationale=parsed_response_1.rationale
+                    is_cooperative=None,
+                    rationale=abstain_response.rationale
                 )
                 return verdict
         if self.model.startswith("hosted_vllm/"):
@@ -183,12 +207,12 @@ class EvaluatorAgent(Agent):
             completion_kwargs_2['api_base'] = f"http://localhost:{self.port}/v1"
         response_2 = get_completion(**completion_kwargs_2)
         self._calculate_cost(response_2)
-        parsed_response_2 = response_format_step2.model_validate_json(response_2.choices[0].message.content)
+        parsed_response_2 = response_format.model_validate_json(response_2.choices[0].message.content)
         
         verdict = Verdict(
             verdict=parsed_response_2.verdict,
-            is_responsive=parsed_response_1.is_responsive if flag=="responsive" else None,
-            is_affirmative=parsed_response_1.is_affirmative if flag=="affirmative" else None,
+            is_cooperative=not abstain_response.abstain if flag=="cooperative" else None,
+            is_affirmative=abstain_response.is_affirmative if flag=="affirmative" else None,
             rationale=parsed_response_2.rationale
         )
         
@@ -196,11 +220,11 @@ class EvaluatorAgent(Agent):
 
     def __verdict_sanity_check(self, verdict: BaseModel) -> bool:
         """Check if the verdict object has valid fields"""
-        if verdict.verdict in ['conflict', 'plausible', 'non-responsive']:
-            if verdict.is_responsive:
+        if verdict.verdict in ['conflict', 'plausible', 'uncooperative']:
+            if verdict.is_cooperative:
                 return verdict.verdict in ['conflict', 'plausible']
             else:
-                return verdict.verdict == 'non-responsive'
+                return verdict.verdict == 'uncooperative'
         elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']:
             if verdict.is_affirmative:
                 return verdict.verdict in ['supported', 'rejected']
@@ -216,7 +240,7 @@ class EvaluatorAgent(Agent):
             if turn.type != 'repeat':
                 for env_obs in turn.environment_observation:
                     if env_obs.observation_type == "interviewee_response":
-                        if env_obs.response.content == user_response:
+                        if env_obs.response.content == user_response and env_obs.response.question == self.memory[idx - 1]['content']:
                             question = env_obs.response.question
                             return i, question, user_response
 
@@ -229,16 +253,39 @@ class EvaluatorAgent(Agent):
                 messages_lists.append(self.memory[:i+1])
                 user_indices.append(i)
         
+        qa_pairs = [{"question": self.memory[i-1]['content'], "response": self.memory[i]['content'], "flag": "affirmative" if self.memory[i-2]['role']=='tool' else "cooperative"} for i in user_indices]
+        
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            abstain_results = list(tqdm(executor.map(self.__generate_abstain, qa_pairs), 
+                                       total=len(messages_lists), 
+                                       desc="Abstain evaluation"))
+        
+        # find the first user indices where not abstaining
+        for idx, parsed_response in zip(user_indices, abstain_results):
+            if (qa_pairs[0]['flag']=='cooperative' and not parsed_response.abstain) or (qa_pairs[0]['flag']=='affirmative' and parsed_response.is_affirmative):
+                break
                 
-        with ThreadPoolExecutor(max_workers=len(messages_lists)) as executor:
-            results = list(tqdm(executor.map(self.__generate_verdict, messages_lists), 
+        if idx == user_indices[-1]: # all abstained
+            return # nothing to evaluate
+        elif idx > user_indices[0]:
+             # dropping all prior abstained user messages, also droping the first non-abstained message since no prior context
+            messages_lists = messages_lists[messages_lists.index(messages_lists[user_indices.index(idx)])+1:]
+            user_indices = user_indices[user_indices.index(idx)+1:]
+            abstain_results = abstain_results[abstain_results.index(parsed_response)+1:]
+        else:
+            user_indices.pop(0)  # remove the first user message (no prior context for consistency)
+            messages_lists.pop(0)
+            abstain_results.pop(0)
+                
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            results = list(tqdm(executor.map(self.__generate_verdict, messages_lists, abstain_results), 
                                total=len(messages_lists), 
                                desc="Consistency evaluation"))
         
         for idx, verdict in zip(user_indices, results):
             assert self.__verdict_sanity_check(verdict), "Sanity check failed for verdict."
-            if verdict.verdict in ['conflict', 'plausible', 'non-responsive']: # internal eval
-                if verdict.is_responsive:
+            if verdict.verdict in ['conflict', 'plausible', 'uncooperative']: # internal eval
+                if verdict.is_cooperative:
                     turn_idx, question, user_response = self._find_turn_idx(idx, history)
                     if verdict.verdict == 'conflict':
                         self.results_dict['internal']['conflict']['count'] += 1
@@ -257,10 +304,10 @@ class EvaluatorAgent(Agent):
                             'rationale': verdict.rationale
                         })
                 else:
-                    assert verdict.verdict == 'non-responsive', "If is_responsive is False, verdict must be 'non-responsive'"
+                    assert verdict.verdict == 'uncooperative', "If is_cooperative is False, verdict must be 'uncooperative'"
                     turn_idx, question, user_response = self._find_turn_idx(idx, history)
-                    self.results_dict['internal']['non-responsive']['count'] += 1
-                    self.results_dict['internal']['non-responsive']['details'].append({
+                    self.results_dict['internal']['uncooperative']['count'] += 1
+                    self.results_dict['internal']['uncooperative']['details'].append({
                         'turn_index': turn_idx,
                         'question': question,
                         'response': user_response,
@@ -300,7 +347,7 @@ class EvaluatorAgent(Agent):
         
         # Calculate scores
         # Internal score: 2 * plausible ratio * responsive ratio / (plausible ratio + responsive ratio)
-        total_internal = self.results_dict['internal']['plausible']['count'] + self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['non-responsive']['count']
+        total_internal = self.results_dict['internal']['plausible']['count'] + self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['uncooperative']['count']
         plausible_ratio = (self.results_dict['internal']['plausible']['count'] / 
                           (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count'])) if (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count']) > 0 else 0.0
         responsive_ratio = ((self.results_dict['internal']['plausible']['count'] + self.results_dict['internal']['conflict']['count']) / total_internal) if total_internal > 0 else 0.0
@@ -308,7 +355,9 @@ class EvaluatorAgent(Agent):
             internal_score = 2 * plausible_ratio * responsive_ratio / (plausible_ratio + responsive_ratio)
         else:
             internal_score = 0.0
-        self.results_dict['internal']['score'] = internal_score
+        self.results_dict['internal']['score']['harmonic_mean'] = internal_score
+        self.results_dict['internal']['score']['responsiveness_score'] = responsive_ratio
+        self.results_dict['internal']['score']['consistency_score'] = plausible_ratio
         # External score: 2 * supported ratio * affirmative ratio / (supported ratio + affirmative ratio)
         total_external = self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count'] + self.results_dict['external']['non-affirmative']['count']
         supported_ratio = (self.results_dict['external']['supported']['count'] / 
@@ -318,7 +367,9 @@ class EvaluatorAgent(Agent):
             external_score = 2 * supported_ratio * affirmative_ratio / (supported_ratio + affirmative_ratio)
         else:
             external_score = 0.0
-        self.results_dict['external']['score'] = external_score
+        self.results_dict['external']['score']['harmonic_mean'] = external_score
+        self.results_dict['external']['score']['affirmativeness_score'] = affirmative_ratio
+        self.results_dict['external']['score']['consistency_score'] = supported_ratio
     
     def intra_session_eval(self, history: List[Turn]):
         completion_kwargs_list = []
@@ -340,7 +391,7 @@ class EvaluatorAgent(Agent):
                 completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
             completion_kwargs_list.append(completion_kwargs)
         
-        with ThreadPoolExecutor(max_workers=len(completion_kwargs_list)) as executor:
+        with ThreadPoolExecutor(max_workers=16) as executor:
             results = list(tqdm(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list),
                                total=len(completion_kwargs_list),
                                desc="Intra-session evaluation"))
@@ -395,7 +446,7 @@ class EvaluatorAgent(Agent):
                 completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
             completion_kwargs_list.append(completion_kwargs)
             
-        with ThreadPoolExecutor(max_workers=len(completion_kwargs_list)) as executor:
+        with ThreadPoolExecutor(max_workers=16) as executor:
             results = list(tqdm(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list),
                                total=len(completion_kwargs_list),
                                desc="Inter-session evaluation"))
@@ -409,8 +460,8 @@ class EvaluatorAgent(Agent):
                 self._calculate_cost(res)
                 judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
             self.results_dict['stability']['inter_session']['details'].append({
-                "question": question,
-                "responses": [get_to_knows[turn_idx].environment_observation[0].response.content for get_to_knows in all_get_to_knows],
+                "question": all_get_to_knows[0][i].environment_observation[0].response.question,
+                "responses": [turn.environment_observation[0].response.content for turn in [all_get_to_knows[sess_idx][i] for sess_idx in range(len(all_get_to_knows))]],
                 "is_aligned": judge
             })
             self.results_dict['stability']['inter_session']['score'] += (judge=='TRUE')

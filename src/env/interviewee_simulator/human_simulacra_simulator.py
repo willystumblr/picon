@@ -36,7 +36,7 @@ class HumanSimulacraSimulator(BaseIntervieweeSimulator):
         response = self.client_or_model.send_message(message)
         
         self._ai_check(message, response)
-        return IntervieweeResponse(response=response)
+        return IntervieweeResponse(question=message, content=response)
         
     
     def calculate_cost(self) -> float:

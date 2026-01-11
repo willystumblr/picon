@@ -138,7 +138,7 @@ class EvaluatorAgent(Agent):
         parsed_response = response_format.model_validate_json(response_1.choices[0].message.content)
         return parsed_response
     
-    def __generate_verdict(self, conversation_log: str, abstain_response: BaseModel, flag: str):
+    def __generate_verdict(self, conversation_log: str, abstain_response: BaseModel, flag: str, current_question: str, current_response: str):
         class InternalVerdictResponseFormat(BaseModel):
             verdict: Literal['conflict', 'plausible']
             rationale: str = Field(..., description="The rationale behind the verdict")
@@ -158,13 +158,16 @@ class EvaluatorAgent(Agent):
         else:
             response_format = InternalVerdictResponseFormat
         
+        # Build the full prompt with conversation history and the current Q&A to evaluate
+        current_qa_str = f"\n\nCurrent Question: {current_question}\nCurrent Response: {current_response}"
+        
         if flag == "cooperative":  # responsive
             if not abstain_response.abstain:
                 completion_kwargs_2 = dict(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": self.memory[0]['content']},
-                        {"role": "user", "content": conversation_log + "\n\nBased on the conversation so far, determine whether the latest user response is in conflict with or plausible given the previous responses."}
+                        {"role": "user", "content": conversation_log + current_qa_str + "\n\nBased on the conversation history above, determine whether the Current Response is in conflict with or plausible given the previous responses."}
                     ],
                     reasoning_effort="low",
                     response_format=response_format
@@ -183,7 +186,7 @@ class EvaluatorAgent(Agent):
                     model=self.model,
                     messages=[
                         {"role": "system", "content": self.memory[0]['content']},
-                        {"role": "user", "content": conversation_log + "\n\nBased on the conversation so far, determine whether the latest user response is supported by or rejected by the search results provided."}
+                        {"role": "user", "content": conversation_log + current_qa_str + "\n\nBased on the conversation history above, determine whether the Current Response is supported by or rejected by the search results provided."}
                     ],
                     reasoning_effort="low",
                     response_format=response_format
@@ -328,6 +331,33 @@ class EvaluatorAgent(Agent):
             abstain_results = list(tqdm(executor.map(self.__generate_abstain, qa_pairs), 
                                        total=len(qa_pairs), 
                                        desc="Abstain evaluation"))
+        # Compute affirmative_ratio and responsive_ratio
+        affirmative_count = sum(1 for item, parsed_response in zip(eval_items, abstain_results) if item['flag']=='affirmative' and parsed_response.is_affirmative)
+        responsive_count = sum(1 for item, parsed_response in zip(eval_items, abstain_results) if item['flag']=='cooperative' and not parsed_response.abstain)
+        affirmative_ratio = (affirmative_count / sum(1 for item in eval_items if item['flag']=='affirmative')) if sum(1 for item in eval_items if item['flag']=='affirmative') > 0 else 0.0
+        responsive_ratio = (responsive_count / sum(1 for item in eval_items if item['flag']=='cooperative')) if sum(1 for item in eval_items if item['flag']=='cooperative') > 0 else 0.0
+        
+        # Store results in self.results_dict (details)
+        for item, verdict in zip(eval_items, abstain_results):
+            if item['flag'] == 'cooperative':
+                if verdict.abstain:
+                    self.results_dict['internal']['uncooperative']['count'] += 1
+                    self.results_dict['internal']['uncooperative']['details'].append({
+                        'turn_index': item['turn_idx'],
+                        'question': item['question'],
+                        'response': item['response'],
+                        'rationale': verdict.rationale
+                    })
+            else:  # affirmative
+                if not verdict.is_affirmative:
+                    self.results_dict['external']['non-affirmative']['count'] += 1
+                    self.results_dict['external']['non-affirmative']['details'].append({
+                        'turn_index': item['turn_idx'],
+                        'question': item['question'],
+                        'response': item['response'],
+                        'rationale': verdict.rationale
+                    })
+        
         
         # Find the first item where not abstaining
         first_non_abstain_idx = None
@@ -357,7 +387,7 @@ class EvaluatorAgent(Agent):
         # Generate verdicts using conversation logs and flags
         def generate_verdict_wrapper(args):
             item, abstain_result = args
-            return self.__generate_verdict(item['conversation_log'], abstain_result, item['flag'])
+            return self.__generate_verdict(item['conversation_log'], abstain_result, item['flag'], item['question'], item['response'])
         
         with ThreadPoolExecutor(max_workers=16) as executor:
             results = list(tqdm(executor.map(generate_verdict_wrapper, zip(eval_items, abstain_results)), 
@@ -389,15 +419,7 @@ class EvaluatorAgent(Agent):
                             'response': user_response,
                             'rationale': verdict.rationale
                         })
-                else:
-                    assert verdict.verdict == 'uncooperative', "If is_cooperative is False, verdict must be 'uncooperative'"
-                    self.results_dict['internal']['uncooperative']['count'] += 1
-                    self.results_dict['internal']['uncooperative']['details'].append({
-                        'turn_index': turn_idx,
-                        'question': question,
-                        'response': user_response,
-                        'rationale': verdict.rationale
-                    })
+                
             elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']:  # external eval
                 if verdict.is_affirmative:
                     if verdict.verdict == 'supported':
@@ -416,24 +438,14 @@ class EvaluatorAgent(Agent):
                             'response': user_response,
                             'rationale': verdict.rationale
                         })
-                else:
-                    assert verdict.verdict == 'non-affirmative', f"If is_affirmative is False, verdict must be 'non-affirmative': {verdict.verdict}"
-                    self.results_dict['external']['non-affirmative']['count'] += 1
-                    self.results_dict['external']['non-affirmative']['details'].append({
-                        'turn_index': turn_idx,
-                        'question': question,
-                        'response': user_response,
-                        'rationale': verdict.rationale
-                    })
             else:
                 raise ValueError("Invalid verdict received from evaluator.")
         
         # Calculate scores
         # Internal score: 2 * plausible ratio * responsive ratio / (plausible ratio + responsive ratio)
-        total_internal = self.results_dict['internal']['plausible']['count'] + self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['uncooperative']['count']
         plausible_ratio = (self.results_dict['internal']['plausible']['count'] / 
                           (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count'])) if (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count']) > 0 else 0.0
-        responsive_ratio = ((self.results_dict['internal']['plausible']['count'] + self.results_dict['internal']['conflict']['count']) / total_internal) if total_internal > 0 else 0.0
+        
         if plausible_ratio + responsive_ratio > 0:
             internal_score = 2 * plausible_ratio * responsive_ratio / (plausible_ratio + responsive_ratio)
         else:
@@ -442,10 +454,9 @@ class EvaluatorAgent(Agent):
         self.results_dict['internal']['score']['responsiveness_score'] = responsive_ratio
         self.results_dict['internal']['score']['consistency_score'] = plausible_ratio
         # External score: 2 * supported ratio * affirmative ratio / (supported ratio + affirmative ratio)
-        total_external = self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count'] + self.results_dict['external']['non-affirmative']['count']
         supported_ratio = (self.results_dict['external']['supported']['count'] / 
                            (self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count'])) if (self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count']) > 0 else 0.0
-        affirmative_ratio = ((self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count']) / total_external) if total_external > 0 else 0.0
+        
         if supported_ratio + affirmative_ratio > 0:
             external_score = 2 * supported_ratio * affirmative_ratio / (supported_ratio + affirmative_ratio)
         else:

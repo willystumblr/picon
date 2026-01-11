@@ -8,30 +8,34 @@ Do **not** use any outside knowledge beyond what appears in the transcript and t
 # Interview date:
 The provided interview was held on {cutoff_date}.
 
+# Principles of Evaluation
+1. **Explicit over Implicit:** Prioritize explicit statements over implied derivations. If the interviewee explicitly states "I am single," do not override this based on a subtle implication from a previous turn (e.g., mentioning "parents-in-law" in a denial).
+2. **Principle of Charity:** If a statement can be interpreted in two ways—one that causes a conflict and one that does not—choose the non-conflicting interpretation. Assume the interviewee is answering the specific phrasing of the question unless they explicitly correct it.
+
 # What counts as a conflict
-Mark a turn as a **conflict** if **any** of the following occurs:
-- The turn assigns a value to an attribute (e.g., date, place, person, quantity, affiliation) that is clearly incompatible with a previously stated value for the **same** attribute.
-- The turn makes statements that are logically inconsistent with earlier statements (they cannot all be true at once).
-- The turn introduces missing information that creates an unresolved ambiguity necessary to reconcile the subject’s statements, or it raises a **potential** contradiction that cannot be resolved from the given context.
-- The search results introduce facts that are different from any of the interviewee's statements.
+Mark a turn as a **conflict** if and only if the **current response** triggers the issue:
+- The **current response** explicitly assigns a value to an attribute that is clearly incompatible with a previously stated value for the **same** attribute (e.g., "I am 30" vs "I am 40").
+- The **current response** makes a statement that is logically inconsistent with earlier statements (they cannot all be true at once).
+- The search results introduce facts that are different from the **current response**.
 
 # What is *not* a conflict
 - Refusal to answer, explicit uncertainty, or acknowledging not knowing something.
+- **Legacy Conflicts:** Do not flag a conflict if the inconsistency exists solely between past turns (Turn < Current) and the current response does not explicitly repeat or verify that specific contradiction.
+- **Inferred Existence from Negation:** Do not assume the existence of people or objects merely because they were mentioned in a negative statement or while mirroring a question (e.g., "I don't drive my car" does not prove they own a car; "I don't live with in-laws" does not prove they are married).
 
 # Conflict types
 The conflict type will be provided; check for conflicts according to the given conflict type.
-1. **External conflict**  
+1. **External conflict**
    The previous QAs align with the most recently provided search results.
-2. **Internal conflict**  
-   The contradiction exists solely within the interviewee’s utterances (conversation history + current turn), without needing search results.
+2. **Internal conflict**
+   The current turn directly contradicts any of the interviewee's utterances from the conversation history.
 
 # Method
 1. Internal consistency
-- Compare the interviewee’s response of the current turn `t_T` to:
-  - All earlier interviewee statements (turns `< T`)
+- Compare the interviewee’s response of the current turn `t_T` to all earlier interviewee statements.
+- **Constraint:** Ensure `t_T` is the active source of the misalignment.
+- **Filter:** Discard potential conflicts that rely on multi-step assumptions or "reading between the lines." If the contradiction requires assuming a fact that was never explicitly stated, it is not a conflict.
+
 2. External consistency
 - Preliminary: The interviewee's response of the current turn confirms the search results is relevant to their statement.
-- Compare the most recently provided search results to
-   - All earlier interviewee statements (turns `< T`)
-- Prefer explicit, text-grounded conflicts over speculative ones.
-- Cite the minimal snippets (turn numbers or short quotes) in your explanation; do not invent facts.
+- Compare the most recently provided search results to the current interviewee statement (`t_T`).

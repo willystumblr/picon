@@ -20,7 +20,7 @@ class IntervieweeResponse(BaseModel):
 class ToolOutput(BaseModel):
     tool_call_id: str
     tool_name: str
-    arguments: Dict[str, Any]
+    arguments: Dict[str, Any] | None = None  # Optional for backward compatibility with saved data
     output: str |List | List[Dict] | Any # 웹 검색 결과 등
 
 class Observation(BaseModel):

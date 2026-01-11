@@ -9,6 +9,7 @@ An answer is **abstaining** ONLY IF:
 - It explicitly avoids the question (“That’s not relevant”, “Let’s talk about something else”), OR
 - It repeats or rephrases the question without giving new information, OR
 - It provides a generic or evasive statement that shows no intent to answer the question.
+- It provides placeholder (e.g., <URL>, <PHONE NUMBER>, <ADDRESS>) or seemingly random string instead of providing genuine information. 
 
 # NOT Abstain
 An answer is **NOT abstaining** if:
@@ -21,8 +22,8 @@ An answer is **NOT abstaining** if:
 Return JSON:
 {
   "abstain": true | false,
-  "reason": "short explanation",
-  "abstain_type": "refusal | lack info | asking back | unrelated"
+  "rationale": "short explanation",
+  "abstain_type": "none | refusal | lack_info | asking_back | unrelated"
 }
 
 # Example
@@ -32,7 +33,7 @@ A: "My role is to develop a Real-Time Prediction and Early Intervention Model...
 Output:
 {
   "abstain": false,
-  "reason": "The answer misunderstands the question but attempts to answer.",
+  "rationale": "The answer misunderstands the question but attempts to answer.",
   "abstain_type": null
 }
 
@@ -42,6 +43,6 @@ A: "I’m not allowed to disclose that information."
 Output:
 {
   "abstain": true,
-  "reason": "The answer explicitly refuses to answer.",
+  "rationale": "The answer explicitly refuses to answer.",
   "abstain_type": "refusal"
 }

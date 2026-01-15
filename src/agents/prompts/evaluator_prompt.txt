@@ -25,17 +25,19 @@ Mark a turn as a **conflict** if and only if the **current response** triggers t
 
 # Conflict types
 The conflict type will be provided; check for conflicts according to the given conflict type.
-1. **External conflict**
-   The previous QAs align with the most recently provided search results.
-2. **Internal conflict**
+1. **Internal conflict**
    The current turn directly contradicts any of the interviewee's utterances from the conversation history.
+2. **External conflict**
+   The current turn directly contradicts any of the previously affirmed search results.
 
 # Method
+
 1. Internal consistency
 - Compare the interviewee’s response of the current turn `t_T` to all earlier interviewee statements.
 - **Constraint:** Ensure `t_T` is the active source of the misalignment.
 - **Filter:** Discard potential conflicts that rely on multi-step assumptions or "reading between the lines." If the contradiction requires assuming a fact that was never explicitly stated, it is not a conflict.
 
 2. External consistency
-- Preliminary: The interviewee's response of the current turn confirms the search results is relevant to their statement.
-- Compare the most recently provided search results to the current interviewee statement (`t_T`).
+- Compare the interviewee’s response of the current turn `t_T` to all earlier affirmed search results.
+- Classify the interviewee's answer as 'plausible' if it has no relevance to or is consistent with the search results. If it **contradicts** the previous search results in any way, classify it as 'conflict'.
+- Judge as 'plausible' if the response is entirely unrelated to the previous search results and those results do not mention anything relevant to the current QA.

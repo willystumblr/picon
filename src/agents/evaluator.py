@@ -15,13 +15,15 @@ from tqdm import tqdm
 
 litellm.drop_params = True
 
+
 class EvaluatorAgent(Agent):
     def __init__(self, **kwargs):
         super().__init__(
             role=kwargs.get('role', "evaluator"),
             system_message=kwargs.get('system_message', ""),
             model=kwargs.get('model', "gemini/gemini-2.5-flash"),
-            port=kwargs.get('port', None)
+            port=kwargs.get('port', None),
+            host=kwargs.get('host', 'localhost')
         )
         current_dir = os.path.dirname(os.path.abspath(__file__)) 
         self.REPEAT_PROMPT = ("You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning. "
@@ -40,6 +42,7 @@ class EvaluatorAgent(Agent):
             "- *Includes:* \"I don't know\", \"Maybe\", \"Not sure\", irrelevant answers.\n\n"
             "Please strictly follow the guidelines above when making your judgment."
         )
+        self.affirmed_search_results = []  # Store affirmed search results for external consistency check
         self.results_dict = {
             'internal': {
                 'score': {
@@ -66,11 +69,11 @@ class EvaluatorAgent(Agent):
                     "affirmativeness_score": 0.0,
                     "consistency_score": 0.0,
                 },
-                'supported': {
+                'plausible': {
                     "count": 0,
                     "details": []
                 },
-                'rejected': {
+                'conflict': {
                     "count": 0,
                     "details": []
                 },
@@ -106,128 +109,132 @@ class EvaluatorAgent(Agent):
         else:
             self.memory.append(kwargs) # typically role and content
 
-    def __generate_abstain(self, qa_pair: Dict[str, str]):
-        class InternalResponsive(BaseModel):
-            abstain: bool = Field(..., description="Whether the response is abstaining from answering")
+    def __generate_uncooperative_check(self, qa_pair: Dict[str, Any]):
+        """Check if the answer is uncooperative (Step 1)"""
+        class UncooperativeResponse(BaseModel):
+            is_uncooperative: bool = Field(..., description="Whether the response is uncooperative (abstaining from answering)")
             rationale: str = Field(..., description="The rationale behind the verdict")
-            abstain_type: Literal["none", "refusal", "lack_info", "asking_back", "unrelated"] | None = Field(None, description="Type of abstention if abstain is True")
+            uncooperative_type: Literal["none", "refusal", "lack_info", "asking_back", "unrelated"] | None = Field(None, description="Type of uncooperative response")
+        
+        user_content = "Question: " + qa_pair['question'] + "\n\nAnswer: " + qa_pair['response']
+        
+        if qa_pair.get('log_prompt', False):
+            logging.info(f"[Uncooperative Check] System Prompt:\n{self.abstain_prompt}")
+            logging.info(f"[Uncooperative Check] User Prompt:\n{user_content}")
             
-        class ExternalAffirmative(BaseModel):
+        completion_kwargs = dict(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.abstain_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            reasoning_effort="low",
+            response_format=UncooperativeResponse
+        )
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
+        response = get_completion(**completion_kwargs)
+        self._calculate_cost(response)
+        parsed_response = UncooperativeResponse.model_validate_json(response.choices[0].message.content)
+        return parsed_response
+    
+    def __generate_affirmative_check(self, qa_pair: Dict[str, Any]):
+        """Check if the answer affirms the search result (Step 2 - only for confirmation questions)"""
+        class AffirmativeResponse(BaseModel):
             is_affirmative: bool = Field(..., description="Whether the response affirms the search result")
             rationale: str = Field(..., description="The rationale behind the verdict")
         
-        if qa_pair['flag']=='affirmative':
-            response_format = ExternalAffirmative
-        else:
-            response_format = InternalResponsive
-            
-        completion_kwargs_1 = dict(
+        user_content = "Question: " + qa_pair['question'] + "\n\nAnswer: " + qa_pair['response']
+        
+        if qa_pair.get('log_prompt', False):
+            logging.info(f"[Affirmative Check] System Prompt:\n{self.affirmative_prompt}")
+            logging.info(f"[Affirmative Check] User Prompt:\n{user_content}")
+        
+        completion_kwargs = dict(
             model=self.model,
             messages=[
-                {"role": "system", "content": self.abstain_prompt} if qa_pair['flag']=="cooperative" else {"role": "system", "content": self.affirmative_prompt},
-                {"role": "user", "content": "Question: " + qa_pair['question'] + "\n\nAnswer: " + qa_pair['response']}
+                {"role": "system", "content": self.affirmative_prompt},
+                {"role": "user", "content": user_content}
             ],
             reasoning_effort="low",
-            response_format=response_format
+            response_format=AffirmativeResponse
         )
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
-            completion_kwargs_1['api_base'] = f"http://localhost:{self.port}/v1"
-        response_1 = get_completion(**completion_kwargs_1)
-        self._calculate_cost(response_1)
-        parsed_response = response_format.model_validate_json(response_1.choices[0].message.content)
+            completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
+        response = get_completion(**completion_kwargs)
+        self._calculate_cost(response)
+        parsed_response = AffirmativeResponse.model_validate_json(response.choices[0].message.content)
         return parsed_response
     
-    def __generate_verdict(self, conversation_log: str, abstain_response: BaseModel, flag: str, current_question: str, current_response: str):
+    def __generate_internal_consistency_verdict(self, qa_history: str, current_question: str, current_response: str, log_prompt: bool = False):
+        """Generate internal consistency verdict (conflict/plausible) using previous Q&A without tool outputs"""
         class InternalVerdictResponseFormat(BaseModel):
             verdict: Literal['conflict', 'plausible']
             rationale: str = Field(..., description="The rationale behind the verdict")
-            
-        class ExternalVerdictResponseFormat(BaseModel):
-            verdict: Literal['supported', 'rejected']
-            rationale: str = Field(..., description="The rationale behind the verdict")
         
-        class Verdict(BaseModel):
-            verdict: str = Field(..., description="The verdict of the evaluation")
-            is_cooperative: bool | None = Field(None, description="Whether the response is cooperative to the question")
-            is_affirmative: bool | None = Field(None, description="Whether the response affirms the search result")
-            rationale: str = Field(..., description="The rationale behind the verdict")
-        
-        if flag == "affirmative":
-            response_format = ExternalVerdictResponseFormat
-        else:
-            response_format = InternalVerdictResponseFormat
-        
-        # Build the full prompt with conversation history and the current Q&A to evaluate
         current_qa_str = f"\n\nCurrent Question: {current_question}\nCurrent Response: {current_response}"
+        user_content = qa_history + current_qa_str + "\n\nBased on the previous Q&A above (without any search results), determine whether the Current Response is in conflict with or plausible given the previous responses."
         
-        if flag == "cooperative":  # responsive
-            if not abstain_response.abstain:
-                completion_kwargs_2 = dict(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": self.memory[0]['content']},
-                        {"role": "user", "content": conversation_log + current_qa_str + "\n\nBased on the conversation history above, determine whether the Current Response is in conflict with or plausible given the previous responses."}
-                    ],
-                    reasoning_effort="low",
-                    response_format=response_format
-                )
-            else:
-                verdict = Verdict(
-                    verdict="uncooperative",
-                    is_cooperative=False,
-                    is_affirmative=None,
-                    rationale=abstain_response.rationale
-                )
-                return verdict
-        else:  # affirmative
-            if abstain_response.is_affirmative:
-                completion_kwargs_2 = dict(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": self.memory[0]['content']},
-                        {"role": "user", "content": conversation_log + current_qa_str + "\n\nBased on the conversation history above, determine whether the Current Response is supported by or rejected by the search results provided."}
-                    ],
-                    reasoning_effort="low",
-                    response_format=response_format
-                )
-            else:
-                verdict = Verdict(
-                    verdict="non-affirmative",
-                    is_affirmative=False,
-                    is_cooperative=None,
-                    rationale=abstain_response.rationale
-                )
-                return verdict
-        if self.model.startswith("hosted_vllm/"):
-            assert self.port is not None, "Port must be specified for hosted_vllm models."    
-            completion_kwargs_2['api_base'] = f"http://localhost:{self.port}/v1"
-        response_2 = get_completion(**completion_kwargs_2)
-        self._calculate_cost(response_2)
-        parsed_response_2 = response_format.model_validate_json(response_2.choices[0].message.content)
+        if log_prompt:
+            logging.info(f"[Internal Consistency Check] System Prompt:\n{self.memory[0]['content']}")
+            logging.info(f"[Internal Consistency Check] User Prompt:\n{user_content}")
         
-        verdict = Verdict(
-            verdict=parsed_response_2.verdict,
-            is_cooperative=not abstain_response.abstain if flag=="cooperative" else None,
-            is_affirmative=abstain_response.is_affirmative if flag=="affirmative" else None,
-            rationale=parsed_response_2.rationale
+        completion_kwargs = dict(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.memory[0]['content']},
+                {"role": "user", "content": user_content}
+            ],
+            reasoning_effort="low",
+            response_format=InternalVerdictResponseFormat
         )
         
-        return verdict
-
-    def __verdict_sanity_check(self, verdict: BaseModel) -> bool:
-        """Check if the verdict object has valid fields"""
-        if verdict.verdict in ['conflict', 'plausible', 'uncooperative']:
-            if verdict.is_cooperative:
-                return verdict.verdict in ['conflict', 'plausible']
-            else:
-                return verdict.verdict == 'uncooperative'
-        elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']:
-            if verdict.is_affirmative:
-                return verdict.verdict in ['supported', 'rejected']
-            else:
-                return verdict.verdict == 'non-affirmative'
-        return False
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
+        
+        response = get_completion(**completion_kwargs)
+        self._calculate_cost(response)
+        parsed_response = InternalVerdictResponseFormat.model_validate_json(response.choices[0].message.content)
+        
+        return parsed_response
+    
+    def __generate_external_consistency_verdict(self, affirmed_search_results: List[str], current_question: str, current_response: str, log_prompt: bool = False):
+        """Generate external consistency verdict (plausible/conflict) using affirmed search results"""
+        class ExternalVerdictResponseFormat(BaseModel):
+            verdict: Literal['plausible', 'conflict']
+            rationale: str = Field(..., description="The rationale behind the verdict")
+        
+        search_results_str = "Affirmed Search Results:\n" + "\n\n".join(affirmed_search_results)
+        current_qa_str = f"\n\nCurrent Question: {current_question}\nCurrent Response: {current_response}"
+        user_content = search_results_str + current_qa_str + "\n\nBased on the affirmed search results above, determine whether the Current Response is plausible given or in conflict with the search results."
+        
+        if log_prompt:
+            logging.info(f"[External Consistency Check] System Prompt:\n{self.memory[0]['content']}")
+            logging.info(f"[External Consistency Check] User Prompt:\n{user_content}")
+            logging.info(f"[External Consistency Check] Number of affirmed search results: {len(affirmed_search_results)}")
+        
+        completion_kwargs = dict(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.memory[0]['content']},
+                {"role": "user", "content": user_content}
+            ],
+            reasoning_effort="low",
+            response_format=ExternalVerdictResponseFormat
+        )
+        
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
+        
+        response = get_completion(**completion_kwargs)
+        self._calculate_cost(response)
+        parsed_response = ExternalVerdictResponseFormat.model_validate_json(response.choices[0].message.content)
+        
+        return parsed_response
     
     def _extract_tool_output_str(self, tool_output: 'ToolOutput') -> str:
         """Extract tool output string including claims and output."""
@@ -243,10 +250,11 @@ class EvaluatorAgent(Agent):
         """
         Evaluate consistency using history directly instead of evaluator's memory.
         
-        For each turn in history:
-        - First element of environment_observation is for internal/cooperative evaluation
-        - Subsequent interviewee_response elements are for external/affirmative evaluation
-        - Tool outputs are matched to confirmation responses by index
+        For every answer from user:
+        1. Check if the answer is uncooperative
+        2. If confirmation question, check if affirmative and save affirmed search results
+        3. Internal check: previous Q&A (without tool outputs) + current Q&A
+        4. External check: affirmed search results + current Q&A (skip if no affirmed results)
         """
         # Filter out repeat turns
         non_repeat_turns = [turn for turn in history if turn.type != 'repeat']
@@ -254,33 +262,36 @@ class EvaluatorAgent(Agent):
         if not non_repeat_turns:
             return  # nothing to evaluate
         
+        # Reset affirmed search results
+        self.affirmed_search_results = []
+        
         # Build evaluation items from history
-        # Each item contains: turn_idx, question, response, flag, conversation_log (accumulated)
         eval_items = []
-        conversation_log = "Conversation Log:\n\n"
+        qa_history = "Previous Q&A:\n\n"  # For internal check (Q&A only, no tool outputs)
         
         for turn_idx, turn in enumerate(non_repeat_turns):
             env_obs = turn.environment_observation
             if not env_obs:
                 continue
             
-            # First observation is always the target of internal/cooperative evaluation
+            # First observation is always an interviewee response
             first_obs = env_obs[0]
             if first_obs.observation_type == "interviewee_response" and first_obs.response:
                 question = first_obs.response.question
                 response = first_obs.response.content
                 
-                # Add to eval items (internal/cooperative)
+                # Add to eval items (regular question)
                 eval_items.append({
                     'turn_idx': turn_idx,
                     'question': question,
                     'response': response,
-                    'flag': 'cooperative',
-                    'conversation_log': conversation_log  # log up to this point (not including current)
+                    'is_confirmation': False,
+                    'tool_output_str': None,
+                    'qa_history': qa_history  # Q&A history up to this point (for internal check)
                 })
                 
-                # Update conversation log with this Q&A
-                conversation_log += f"Q: {question}\nA: {response}\n\n"
+                # Update Q&A history (without tool outputs)
+                qa_history += f"Q: {question}\nA: {response}\n\n"
             
             # Collect tool outputs from this turn
             tool_outputs = []
@@ -288,8 +299,7 @@ class EvaluatorAgent(Agent):
                 if obs.observation_type == "tool_output" and obs.tool_output:
                     tool_outputs.extend(obs.tool_output)
             
-            # Process subsequent interviewee_responses (confirmation questions) for external/affirmative evaluation
-            # These correspond to tool_outputs by index
+            # Process subsequent interviewee_responses (confirmation questions)
             confirmation_responses = []
             for obs in env_obs[1:]:  # skip first observation
                 if obs.observation_type == "interviewee_response" and obs.response:
@@ -299,171 +309,211 @@ class EvaluatorAgent(Agent):
             for i, tool_output in enumerate(tool_outputs):
                 tool_output_str = self._extract_tool_output_str(tool_output)
                 
-                # Add tool output to conversation log
-                conversation_log += f"Tool Output:\n{tool_output_str}\n\n"
-                
                 # Check if there's a matching confirmation response
                 if i < len(confirmation_responses):
                     conf_obs = confirmation_responses[i]
                     conf_question = conf_obs.response.question
                     conf_response = conf_obs.response.content
                     
-                    # Add to eval items (external/affirmative)
+                    # Add to eval items (confirmation question)
                     eval_items.append({
                         'turn_idx': turn_idx,
                         'question': conf_question,
                         'response': conf_response,
-                        'flag': 'affirmative',
-                        'conversation_log': conversation_log  # log up to this point (not including current)
+                        'is_confirmation': True,
+                        'tool_output_str': tool_output_str,
+                        'qa_history': qa_history  # Q&A history up to this point (for internal check)
                     })
                     
-                    # Update conversation log with this confirmation Q&A
-                    conversation_log += f"Q: {conf_question}\nA: {conf_response}\n\n"
-                # If no matching confirmation question, skip evaluation for this tool output
+                    # Update Q&A history with confirmation Q&A (without tool output)
+                    qa_history += f"Q: {conf_question}\nA: {conf_response}\n\n"
         
         if not eval_items:
             return  # nothing to evaluate
         
-        # Build qa_pairs for abstain evaluation
-        qa_pairs = [{"question": item['question'], "response": item['response'], "flag": item['flag']} for item in eval_items]
+        # Step 1: Check uncooperative for ALL items
+        qa_pairs = [{
+            "question": item['question'], 
+            "response": item['response'], 
+            "log_prompt": (i < 3)
+        } for i, item in enumerate(eval_items)]
         
         with ThreadPoolExecutor(max_workers=16) as executor:
-            abstain_results = list(tqdm(executor.map(self.__generate_abstain, qa_pairs), 
-                                       total=len(qa_pairs), 
-                                       desc="Abstain evaluation"))
-        # Compute affirmative_ratio and responsive_ratio
-        affirmative_count = sum(1 for item, parsed_response in zip(eval_items, abstain_results) if item['flag']=='affirmative' and parsed_response.is_affirmative)
-        responsive_count = sum(1 for item, parsed_response in zip(eval_items, abstain_results) if item['flag']=='cooperative' and not parsed_response.abstain)
-        affirmative_ratio = (affirmative_count / sum(1 for item in eval_items if item['flag']=='affirmative')) if sum(1 for item in eval_items if item['flag']=='affirmative') > 0 else 0.0
-        responsive_ratio = (responsive_count / sum(1 for item in eval_items if item['flag']=='cooperative')) if sum(1 for item in eval_items if item['flag']=='cooperative') > 0 else 0.0
+            uncooperative_results = list(tqdm(executor.map(self.__generate_uncooperative_check, qa_pairs), 
+                                              total=len(qa_pairs), 
+                                              desc="Uncooperative check"))
         
-        # Store results in self.results_dict (details)
-        for item, verdict in zip(eval_items, abstain_results):
-            if item['flag'] == 'cooperative':
-                if verdict.abstain:
-                    self.results_dict['internal']['uncooperative']['count'] += 1
-                    self.results_dict['internal']['uncooperative']['details'].append({
-                        'turn_index': item['turn_idx'],
-                        'question': item['question'],
-                        'response': item['response'],
-                        'rationale': verdict.rationale
-                    })
-            else:  # affirmative
-                if not verdict.is_affirmative:
-                    self.results_dict['external']['non-affirmative']['count'] += 1
-                    self.results_dict['external']['non-affirmative']['details'].append({
-                        'turn_index': item['turn_idx'],
-                        'question': item['question'],
-                        'response': item['response'],
-                        'rationale': verdict.rationale
-                    })
+        # Step 2: Check affirmative for confirmation questions only
+        confirmation_items_indices = [i for i, item in enumerate(eval_items) if item['is_confirmation']]
+        confirmation_qa_pairs = [{
+            "question": eval_items[i]['question'], 
+            "response": eval_items[i]['response'], 
+            "log_prompt": (j < 3)
+        } for j, i in enumerate(confirmation_items_indices)]
         
+        affirmative_results = [None] * len(eval_items)  # Initialize with None for non-confirmation items
+        if confirmation_qa_pairs:
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                confirmation_affirmative_results = list(tqdm(executor.map(self.__generate_affirmative_check, confirmation_qa_pairs), 
+                                                              total=len(confirmation_qa_pairs), 
+                                                              desc="Affirmative check"))
+            for idx, result in zip(confirmation_items_indices, confirmation_affirmative_results):
+                affirmative_results[idx] = result
         
-        # Find the first item where not abstaining
-        first_non_abstain_idx = None
-        for i, (item, parsed_response) in enumerate(zip(eval_items, abstain_results)):
-            if item['flag'] == 'cooperative' and not parsed_response.abstain:
-                first_non_abstain_idx = i
-                break
-            elif item['flag'] == 'affirmative' and parsed_response.is_affirmative:
-                first_non_abstain_idx = i
-                break
+        # Store uncooperative results and compute ratios
+        cooperative_count = 0
+        total_count = len(eval_items)
         
-        if first_non_abstain_idx is None:
-            return  # all abstained, nothing to evaluate
-        
-        # Drop all prior items and the first non-abstained item (no prior context for consistency)
-        if first_non_abstain_idx == len(eval_items) - 1:
-            return  # only the last item is non-abstaining, nothing to evaluate
-        
-        # Start from the item after the first non-abstaining one
-        eval_items = eval_items[first_non_abstain_idx + 1:]
-        abstain_results = abstain_results[first_non_abstain_idx + 1:]
-        qa_pairs = qa_pairs[first_non_abstain_idx + 1:]
-        
-        if not eval_items:
-            return  # nothing left to evaluate
-        
-        # Generate verdicts using conversation logs and flags
-        def generate_verdict_wrapper(args):
-            item, abstain_result = args
-            return self.__generate_verdict(item['conversation_log'], abstain_result, item['flag'], item['question'], item['response'])
-        
-        with ThreadPoolExecutor(max_workers=16) as executor:
-            results = list(tqdm(executor.map(generate_verdict_wrapper, zip(eval_items, abstain_results)), 
-                               total=len(eval_items), 
-                               desc="Consistency evaluation"))
-        
-        # Process results
-        for item, verdict in zip(eval_items, results):
-            assert self.__verdict_sanity_check(verdict), "Sanity check failed for verdict."
-            turn_idx = item['turn_idx']
-            question = item['question']
-            user_response = item['response']
-            
-            if verdict.verdict in ['conflict', 'plausible', 'uncooperative']:  # internal eval
-                if verdict.is_cooperative:
-                    if verdict.verdict == 'conflict':
-                        self.results_dict['internal']['conflict']['count'] += 1
-                        self.results_dict['internal']['conflict']['details'].append({
-                            'turn_index': turn_idx,
-                            'question': question,
-                            'response': user_response,
-                            'rationale': verdict.rationale
-                        })
-                    elif verdict.verdict == 'plausible':
-                        self.results_dict['internal']['plausible']['count'] += 1
-                        self.results_dict['internal']['plausible']['details'].append({
-                            'turn_index': turn_idx,
-                            'question': question,
-                            'response': user_response,
-                            'rationale': verdict.rationale
-                        })
-                
-            elif verdict.verdict in ['supported', 'rejected', 'non-affirmative']:  # external eval
-                if verdict.is_affirmative:
-                    if verdict.verdict == 'supported':
-                        self.results_dict['external']['supported']['count'] += 1
-                        self.results_dict['external']['supported']['details'].append({
-                            'turn_index': turn_idx,
-                            'question': question,
-                            'response': user_response,
-                            'rationale': verdict.rationale
-                        })
-                    elif verdict.verdict == 'rejected':
-                        self.results_dict['external']['rejected']['count'] += 1
-                        self.results_dict['external']['rejected']['details'].append({
-                            'turn_index': turn_idx,
-                            'question': question,
-                            'response': user_response,
-                            'rationale': verdict.rationale
-                        })
+        for item, uncoop_result in zip(eval_items, uncooperative_results):
+            if uncoop_result.is_uncooperative:
+                self.results_dict['internal']['uncooperative']['count'] += 1
+                self.results_dict['internal']['uncooperative']['details'].append({
+                    'turn_index': item['turn_idx'],
+                    'question': item['question'],
+                    'response': item['response'],
+                    'rationale': uncoop_result.rationale,
+                    'uncooperative_type': uncoop_result.uncooperative_type
+                })
             else:
-                raise ValueError("Invalid verdict received from evaluator.")
+                cooperative_count += 1
         
-        # Calculate scores
-        # Internal score: 2 * plausible ratio * responsive ratio / (plausible ratio + responsive ratio)
-        plausible_ratio = (self.results_dict['internal']['plausible']['count'] / 
-                          (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count'])) if (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count']) > 0 else 0.0
+        responsive_ratio = cooperative_count / total_count if total_count > 0 else 0.0
         
-        if plausible_ratio + responsive_ratio > 0:
-            internal_score = 2 * plausible_ratio * responsive_ratio / (plausible_ratio + responsive_ratio)
+        # Store affirmative/non-affirmative results and save affirmed search results
+        affirmative_count = 0
+        total_confirmation_count = len(confirmation_items_indices)
+        
+        for idx in confirmation_items_indices:
+            item = eval_items[idx]
+            aff_result = affirmative_results[idx]
+            if aff_result.is_affirmative:
+                affirmative_count += 1
+                # Save affirmed search result
+                self.affirmed_search_results.append(item['tool_output_str'])
+            else:
+                self.results_dict['external']['non-affirmative']['count'] += 1
+                self.results_dict['external']['non-affirmative']['details'].append({
+                    'turn_index': item['turn_idx'],
+                    'question': item['question'],
+                    'response': item['response'],
+                    'rationale': aff_result.rationale
+                })
+        
+        affirmative_ratio = affirmative_count / total_confirmation_count if total_confirmation_count > 0 else 0.0
+        
+        # Step 3: Internal consistency check (need at least 2 items for previous context)
+        # Step 4: External consistency check (all Q&A with all affirmed results)
+        
+        # Internal check: skip first item as it has no prior context
+        if len(eval_items) >= 2:
+            consistency_eval_items = eval_items[1:]
+            consistency_uncoop_results = uncooperative_results[1:]
+            
+            # Internal consistency check for all items (from 2nd item)
+            def generate_internal_wrapper(args):
+                item, idx = args
+                return self.__generate_internal_consistency_verdict(item['qa_history'], item['question'], item['response'], log_prompt=(idx < 3))
+            
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                internal_results = list(tqdm(executor.map(generate_internal_wrapper, [(item, idx) for idx, item in enumerate(consistency_eval_items)]), 
+                                            total=len(consistency_eval_items), 
+                                            desc="Internal consistency check"))
+            
+            # Process internal consistency results
+            for item, uncoop_result, internal_verdict in zip(consistency_eval_items, consistency_uncoop_results, internal_results):
+                turn_idx = item['turn_idx']
+                question = item['question']
+                user_response = item['response']
+                
+                if internal_verdict.verdict == 'conflict':
+                    self.results_dict['internal']['conflict']['count'] += 1
+                    self.results_dict['internal']['conflict']['details'].append({
+                        'turn_index': turn_idx,
+                        'question': question,
+                        'response': user_response,
+                        'rationale': internal_verdict.rationale,
+                        'is_cooperative': not uncoop_result.is_uncooperative
+                    })
+                elif internal_verdict.verdict == 'plausible':
+                    self.results_dict['internal']['plausible']['count'] += 1
+                    self.results_dict['internal']['plausible']['details'].append({
+                        'turn_index': turn_idx,
+                        'question': question,
+                        'response': user_response,
+                        'rationale': internal_verdict.rationale,
+                        'is_cooperative': not uncoop_result.is_uncooperative
+                    })
+        
+        # External check: all Q&A (excluding confirmation questions) with ALL affirmed results
+        if self.affirmed_search_results:
+            all_affirmed = self.affirmed_search_results  # Use all affirmed results from entire conversation
+            
+            # Filter out confirmation questions for external check
+            non_confirmation_items = [(item, idx) for idx, item in enumerate(eval_items) if not item['is_confirmation']]
+            
+            def generate_external_wrapper(args):
+                item, idx = args
+                return self.__generate_external_consistency_verdict(all_affirmed, item['question'], item['response'], log_prompt=(idx < 3))
+            
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                external_results = list(tqdm(executor.map(generate_external_wrapper, non_confirmation_items), 
+                                            total=len(non_confirmation_items), 
+                                            desc="External consistency check"))
+            
+            # Process external consistency results
+            for (item, _), external_verdict in zip(non_confirmation_items, external_results):
+                turn_idx = item['turn_idx']
+                question = item['question']
+                user_response = item['response']
+                
+                if external_verdict.verdict == 'conflict':
+                    self.results_dict['external']['conflict']['count'] += 1
+                    self.results_dict['external']['conflict']['details'].append({
+                        'turn_index': turn_idx,
+                        'question': question,
+                        'response': user_response,
+                        'rationale': external_verdict.rationale
+                    })
+                elif external_verdict.verdict == 'plausible':
+                    self.results_dict['external']['plausible']['count'] += 1
+                    self.results_dict['external']['plausible']['details'].append({
+                        'turn_index': turn_idx,
+                        'question': question,
+                        'response': user_response,
+                        'rationale': external_verdict.rationale
+                    })
+        
+        # Calculate final scores
+        internal_plausible_ratio = (self.results_dict['internal']['plausible']['count'] / 
+                                   (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count'])) if (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count']) > 0 else 0.0
+        
+        external_plausible_ratio = (self.results_dict['external']['plausible']['count'] / 
+                                    (self.results_dict['external']['plausible']['count'] + self.results_dict['external']['conflict']['count'])) if (self.results_dict['external']['plausible']['count'] + self.results_dict['external']['conflict']['count']) > 0 else 0.0
+        
+        self._calculate_final_scores(responsive_ratio, affirmative_ratio, internal_plausible_ratio, external_plausible_ratio)
+        
+        # Save affirmed search results to final output
+        self.results_dict['confirmed_search_results'] = self.affirmed_search_results
+    
+    def _calculate_final_scores(self, responsive_ratio: float, affirmative_ratio: float, internal_plausible_ratio: float, external_plausible_ratio: float):
+        """Calculate and store final scores"""
+        # Internal score: harmonic mean of plausible ratio and responsive ratio
+        if internal_plausible_ratio + responsive_ratio > 0:
+            internal_score = 2 * internal_plausible_ratio * responsive_ratio / (internal_plausible_ratio + responsive_ratio)
         else:
             internal_score = 0.0
         self.results_dict['internal']['score']['harmonic_mean'] = internal_score
         self.results_dict['internal']['score']['responsiveness_score'] = responsive_ratio
-        self.results_dict['internal']['score']['consistency_score'] = plausible_ratio
-        # External score: 2 * supported ratio * affirmative ratio / (supported ratio + affirmative ratio)
-        supported_ratio = (self.results_dict['external']['supported']['count'] / 
-                           (self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count'])) if (self.results_dict['external']['supported']['count'] + self.results_dict['external']['rejected']['count']) > 0 else 0.0
+        self.results_dict['internal']['score']['consistency_score'] = internal_plausible_ratio
         
-        if supported_ratio + affirmative_ratio > 0:
-            external_score = 2 * supported_ratio * affirmative_ratio / (supported_ratio + affirmative_ratio)
+        # External score: harmonic mean of plausible ratio and affirmative ratio
+        if external_plausible_ratio + affirmative_ratio > 0:
+            external_score = 2 * external_plausible_ratio * affirmative_ratio / (external_plausible_ratio + affirmative_ratio)
         else:
             external_score = 0.0
         self.results_dict['external']['score']['harmonic_mean'] = external_score
         self.results_dict['external']['score']['affirmativeness_score'] = affirmative_ratio
-        self.results_dict['external']['score']['consistency_score'] = supported_ratio
+        self.results_dict['external']['score']['consistency_score'] = external_plausible_ratio
     
     def intra_session_eval(self, history: List[Turn]):
         completion_kwargs_list = []
@@ -482,7 +532,7 @@ class EvaluatorAgent(Agent):
             )
             if self.model.startswith("hosted_vllm/"):
                 assert self.port is not None, "Port must be specified for hosted_vllm models."    
-                completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+                completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
             completion_kwargs_list.append(completion_kwargs)
         
         with ThreadPoolExecutor(max_workers=16) as executor:
@@ -493,6 +543,8 @@ class EvaluatorAgent(Agent):
         for i, res in enumerate(results):
             self._calculate_cost(res) if not self.model.startswith("hosted_vllm/") else 0.0
             judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+            if '</think>' in judge:
+                judge = judge.split('</think>')[-1].strip()
             while judge not in ["TRUE", "FALSE"]:
                 logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
                 res = get_completion(**completion_kwargs_list[i])
@@ -537,7 +589,7 @@ class EvaluatorAgent(Agent):
             )
             if self.model.startswith("hosted_vllm/"):
                 assert self.port is not None, "Port must be specified for hosted_vllm models."    
-                completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+                completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
             completion_kwargs_list.append(completion_kwargs)
             
         with ThreadPoolExecutor(max_workers=16) as executor:
@@ -560,6 +612,7 @@ class EvaluatorAgent(Agent):
             })
             self.results_dict['stability']['inter_session']['score'] += (judge=='TRUE')
         self.results_dict['stability']['inter_session']['score'] = round(self.results_dict['stability']['inter_session']['score'] / num_turns, 4)
+        
     def act(self, histories: List[List[Turn]]) -> Action:
         main_history = histories[0]
         
@@ -581,5 +634,3 @@ class EvaluatorAgent(Agent):
             action_type="respond",
             content=self.results_dict
         )
-        
-        

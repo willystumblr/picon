@@ -454,27 +454,28 @@ Determine which category best fits the Current Response."""
                         'is_cooperative': not uncoop_result.is_uncooperative
                     })
         
-        # External check: all Q&A (excluding confirmation questions) with ALL affirmed results
+        # External check: all Q&A (including confirmation questions) with ALL affirmed results
         if self.affirmed_search_results:
             all_affirmed = self.affirmed_search_results  # Use all affirmed results from entire conversation
             
-            # Filter out confirmation questions for external check
-            non_confirmation_items = [(item, idx) for idx, item in enumerate(eval_items) if not item['is_confirmation']]
+            # Include all items (including confirmation questions) for external check
+            all_items = [(item, idx) for idx, item in enumerate(eval_items)]
             
             def generate_external_wrapper(args):
                 item, idx = args
                 return self.__generate_external_consistency_verdict(all_affirmed, item['question'], item['response'], log_prompt=(idx < 3))
             
             with ThreadPoolExecutor(max_workers=16) as executor:
-                external_results = list(tqdm(executor.map(generate_external_wrapper, non_confirmation_items), 
-                                            total=len(non_confirmation_items), 
+                external_results = list(tqdm(executor.map(generate_external_wrapper, all_items), 
+                                            total=len(all_items), 
                                             desc="External consistency check"))
             
             # Process external consistency results
-            for (item, _), external_verdict in zip(non_confirmation_items, external_results):
+            for (item, _), external_verdict in zip(all_items, external_results):
                 turn_idx = item['turn_idx']
                 question = item['question']
                 user_response = item['response']
+                is_confirmation = item['is_confirmation']
                 
                 if external_verdict.verdict == 'irrelevant':
                     self.results_dict['external']['irrelevant']['count'] += 1
@@ -482,7 +483,8 @@ Determine which category best fits the Current Response."""
                         'turn_index': turn_idx,
                         'question': question,
                         'response': user_response,
-                        'rationale': external_verdict.rationale
+                        'rationale': external_verdict.rationale,
+                        'is_confirmation': is_confirmation
                     })
                 elif external_verdict.verdict == 'conflict':
                     self.results_dict['external']['conflict']['count'] += 1
@@ -490,7 +492,8 @@ Determine which category best fits the Current Response."""
                         'turn_index': turn_idx,
                         'question': question,
                         'response': user_response,
-                        'rationale': external_verdict.rationale
+                        'rationale': external_verdict.rationale,
+                        'is_confirmation': is_confirmation
                     })
                 elif external_verdict.verdict == 'plausible':
                     self.results_dict['external']['plausible']['count'] += 1
@@ -498,7 +501,8 @@ Determine which category best fits the Current Response."""
                         'turn_index': turn_idx,
                         'question': question,
                         'response': user_response,
-                        'rationale': external_verdict.rationale
+                        'rationale': external_verdict.rationale,
+                        'is_confirmation': is_confirmation
                     })
         
         # Calculate final scores

@@ -47,6 +47,10 @@ Extract **ONLY**:
     WORK_OF_ART : Titles of books, songs, etc
     LAW : Named documents made into laws
     LANGUAGE : Any named language
+    EMAIL : Full email addresses
+    URL : Websites, IPs, Domains
+    PHONE : Phone numbers
+    ID_NUM : Patent numbers, serial numbers, form codes, license plates, official document IDs (e.g., "ISO 9001", "Form 1040", "Patent US123456").
 
 Entities must be:
 * Explicitly mentioned in the **Answer** (not the question)
@@ -65,14 +69,12 @@ Entities must be:
 ---
 
 ### What NOT to Extract
-
 Do **NOT** extract:
 * General concepts or categories
 * Common nouns
 * Vague or emotional expressions
 * Purely descriptive, numerical, or temporal information
-  (unless part of a named entity, e.g., “CES 2024”)
-
+  **(UNLESS it is a specific alphanumeric Identifier, Code, or Serial Number)**
 
 ---
 
@@ -110,7 +112,6 @@ If no attribute is explicitly stated, use:
 
 **Only generate a Base Existence Claim if the entity has NEVER appeared in the `Conversation History`.** If the identical entity is present in history, SKIP the base claim and look only for new attribute updates.
 
----
 
 ### Step 2: Additional Atomic Fact Claims
 If the Answer states **additional verifiable atomic facts** about the entity, generate claims for them.
@@ -127,6 +128,22 @@ Only generate claims that:
 * Represent a single atomic fact
 * Can be independently verified
 * Contain no vague or ambiguous entities
+
+### Special Rule for IDENTIFIERS & CODES
+If the extracted entity is a numeric or alphanumeric code (e.g., a certificate number, form number):
+1. **Do not** simply claim the number exists (e.g., avoid "Number 12345 exists").
+2. Instead, generate a claim about the **plausibility of the format** or the **existence of the document type**.
+
+**Examples:**
+* *Input:* "My certificate number is 20902-1994-07-23."
+  * *Entity:* "20902-1994-07-23"
+  * *Claim:* "United States Naturalization Certificates use a format containing a 5-digit sequence followed by a date (YYYY-MM-DD)."
+  *(This allows the downstream verifier to search "Naturalization certificate number format" and confirm if this pattern is standard.)*
+
+* *Input:* "It was on Form 075."
+  * *Entity:* "Form 075"
+  * *Claim:* "Form 075 is a valid official document type within the context of [Conversation Topic]."
+  *(This allows the verifier to search "Does Form 075 exist in immigration?")*
 
 ---
 

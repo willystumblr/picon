@@ -69,6 +69,10 @@ class EvaluatorAgent(Agent):
                     "affirmativeness_score": 0.0,
                     "consistency_score": 0.0,
                 },
+                'irrelevant': {
+                    "count": 0,
+                    "details": []
+                },
                 'plausible': {
                     "count": 0,
                     "details": []
@@ -202,14 +206,20 @@ class EvaluatorAgent(Agent):
         return parsed_response
     
     def __generate_external_consistency_verdict(self, affirmed_search_results: List[str], current_question: str, current_response: str, log_prompt: bool = False):
-        """Generate external consistency verdict (plausible/conflict) using affirmed search results"""
+        """Generate external consistency verdict (irrelevant/plausible/conflict) using affirmed search results"""
         class ExternalVerdictResponseFormat(BaseModel):
-            verdict: Literal['plausible', 'conflict']
+            verdict: Literal['irrelevant', 'plausible', 'conflict']
             rationale: str = Field(..., description="The rationale behind the verdict")
         
         search_results_str = "Affirmed Search Results:\n" + "\n\n".join(affirmed_search_results)
         current_qa_str = f"\n\nCurrent Question: {current_question}\nCurrent Response: {current_response}"
-        user_content = search_results_str + current_qa_str + "\n\nBased on the affirmed search results above, determine whether the Current Response is plausible given or in conflict with the search results."
+        user_content = search_results_str + current_qa_str + """\n\nBased on the affirmed search results above, classify the Current Response into one of three categories:
+
+1. **irrelevant**: The Q&A is completely unrelated to all affirmed search results. There is no overlapping information at all.
+2. **conflict**: The answer contradicts or is inconsistent with at least one affirmed search result.
+3. **plausible**: The answer is related to some affirmed search results but does not conflict with them.
+
+Determine which category best fits the Current Response."""
         
         if log_prompt:
             logging.info(f"[External Consistency Check] System Prompt:\n{self.memory[0]['content']}")
@@ -466,7 +476,15 @@ class EvaluatorAgent(Agent):
                 question = item['question']
                 user_response = item['response']
                 
-                if external_verdict.verdict == 'conflict':
+                if external_verdict.verdict == 'irrelevant':
+                    self.results_dict['external']['irrelevant']['count'] += 1
+                    self.results_dict['external']['irrelevant']['details'].append({
+                        'turn_index': turn_idx,
+                        'question': question,
+                        'response': user_response,
+                        'rationale': external_verdict.rationale
+                    })
+                elif external_verdict.verdict == 'conflict':
                     self.results_dict['external']['conflict']['count'] += 1
                     self.results_dict['external']['conflict']['details'].append({
                         'turn_index': turn_idx,
@@ -543,6 +561,8 @@ class EvaluatorAgent(Agent):
         for i, res in enumerate(results):
             self._calculate_cost(res) if not self.model.startswith("hosted_vllm/") else 0.0
             judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+            if judge is None:
+                breakpoint()
             if '</think>' in judge:
                 judge = judge.split('</think>')[-1].strip()
             while judge not in ["TRUE", "FALSE"]:

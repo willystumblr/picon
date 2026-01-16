@@ -20,8 +20,9 @@ Mark a turn as a **conflict** if and only if the **current response** triggers t
 
 # What is *not* a conflict
 - Refusal to answer, explicit uncertainty, or acknowledging not knowing something.
-- **Legacy Conflicts:** Do not flag a conflict if the inconsistency exists solely between past turns (Turn < Current) and the current response does not explicitly repeat or verify that specific contradiction.
+- **Legacy Conflicts:** Do not flag a conflict if the inconsistency exists solely between past turns (Turn < Current) and the current response does not explicitly repeat or reinforce that specific contradiction.
 - **Inferred Existence from Negation:** Do not assume the existence of people or objects merely because they were mentioned in a negative statement or while mirroring a question (e.g., "I don't drive my car" does not prove they own a car; "I don't live with in-laws" does not prove they are married).
+- 
 
 # Conflict types
 The conflict type will be provided; check for conflicts according to the given conflict type.
@@ -39,5 +40,8 @@ The conflict type will be provided; check for conflicts according to the given c
 
 2. External consistency
 - Compare the interviewee’s response of the current turn `t_T` to all earlier affirmed search results.
-- Classify the interviewee's answer as 'plausible' if it has no relevance to or is consistent with the search results. If it **contradicts** the previous search results in any way, classify it as 'conflict'.
+- Categorize the response into one of three categories : 'irrelevant', 'plausible', 'conflict'
+- Classify the interviewee's answer as 'irrelevant' if the current question and answer are entirely unrelated to the search results.
+- Classify the interviewee's answer as 'plausible' if it has no relevance to or is consistent with the search results.
+- If it **contradicts** the previous search results in any way, classify it as 'conflict'.
 - Judge as 'plausible' if the response is entirely unrelated to the previous search results and those results do not mention anything relevant to the current QA.

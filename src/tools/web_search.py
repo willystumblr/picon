@@ -1,7 +1,9 @@
 # google_claim_search.py
 import json
 import re
-from typing import Optional, List, Dict, Any, ClassVar
+from typing import Optional, List, Dict, Any
+import pdfplumber
+from io import BytesIO
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from pydantic import BaseModel, Field
@@ -162,10 +164,33 @@ class GoogleClaimSearch(BaseModel):
             )
             page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"})
             page.raise_for_status()
-            soup = BeautifulSoup(page.text, "html.parser")
-            title = (soup.title.string or "").strip() if soup.title else ""
-            cleaned = _clean_html(page.text)
-            return {"title": title, "cleaned": cleaned}
+            
+            # Check if the content is a PDF
+            content_type = page.headers.get('Content-Type', '').lower()
+            is_pdf = 'application/pdf' in content_type or url.lower().endswith('.pdf')
+            
+            if is_pdf:
+                # Extract text from PDF
+                try:
+                    with pdfplumber.open(BytesIO(page.content)) as pdf:
+                        full_text = ""
+                        for page_obj in pdf.pages:
+                            text = page_obj.extract_text()
+                            if text:
+                                full_text += text + "\n"
+                        
+                        # Use filename or URL as title for PDFs
+                        title = url.split('/')[-1] if '/' in url else "PDF Document"
+                        cleaned = full_text.strip()
+                        return {"title": title, "cleaned": cleaned}
+                except Exception as pdf_error:
+                    return {"title": "", "error": f"[Error extracting PDF] {pdf_error}"}
+            else:
+                # Handle HTML content
+                soup = BeautifulSoup(page.text, "html.parser")
+                title = (soup.title.string or "").strip() if soup.title else ""
+                cleaned = _clean_html(page.text)
+                return {"title": title, "cleaned": cleaned}
         except Exception as e:
             return {"title": "", "error": f"[Error fetching] {e}"}
     

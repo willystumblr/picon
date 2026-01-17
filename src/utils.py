@@ -340,9 +340,9 @@ def upload_to_github(filepath, content):
     g = Github(token)
     repo = g.get_repo("sujeongim/real_human_interview")
     try:
-        # results 폴더에 저장
-        if not filename.endswith('.json'):
-            filename += '.json'
+        # Ensure filepath ends with .json
+        if not filepath.endswith('.json'):
+            filepath += '.json'
         
         # 파일이 이미 존재하는지 확인
         contents = None
@@ -360,7 +360,7 @@ def upload_to_github(filepath, content):
             repo.update_file(filepath, "Update interview result", content, contents.sha, branch="main")
             logging.info(f"File updated successfully at {filepath}!")
     except Exception as e:
-        logging.error(f"An error occurred while uploading {filename}: {e}", exc_info=True)
+        logging.error(f"An error occurred while uploading {filepath}: {e}", exc_info=True)
         raise  # Re-raise the exception so caller knows upload failed
         
 def download_from_github(filepath):

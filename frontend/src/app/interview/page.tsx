@@ -122,16 +122,16 @@ export default function InterviewPage() {
           {
             id: 'complete',
             type: 'system',
-            content: '🎉 Thank you for completing the interview! Please wait while we evaluate your responses. This may take 1-2 minutes...',
+            content: '🎉 Thank you for completing the interview! Please wait while we save your responses...',
             timestamp: new Date(),
           },
         ]);
         
-        // Save results to backend - this can take 1-2 minutes for evaluation
+        // Save results to backend
         try {
-          // Use AbortController with a longer timeout (3 minutes)
+          // Use AbortController with a reasonable timeout (1 minute)
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // 1 minute timeout
           
           const resultsResponse = await fetch(`/api/results/${sessionData.sessionId}`, {
             signal: controller.signal,
@@ -144,7 +144,7 @@ export default function InterviewPage() {
               {
                 id: 'saved',
                 type: 'system',
-                content: '✅ Your responses have been saved and evaluated successfully. You may now close this page.',
+                content: '✅ Your responses have been saved successfully. You may now close this page.',
                 timestamp: new Date(),
               },
             ]);
@@ -164,7 +164,7 @@ export default function InterviewPage() {
         } catch (saveErr) {
           console.error('Error saving results:', saveErr);
           const errorMessage = saveErr instanceof Error && saveErr.name === 'AbortError'
-            ? '⏱️ The evaluation is taking longer than expected. Your responses may still be saved. Please contact the administrator if you do not receive confirmation.'
+            ? '⏱️ The save is taking longer than expected. Your responses may still be saved. Please contact the administrator if you do not receive confirmation.'
             : '⚠️ There was an issue saving your responses. Please contact the administrator.';
           setMessages((prev) => [
             ...prev,
@@ -337,7 +337,7 @@ export default function InterviewPage() {
         <div className="bg-green-50 border-t border-green-200 px-4 py-4 text-center">
           <p className="text-green-700 font-medium">Interview Complete! 🎉</p>
           <p className="text-sm text-green-600 mt-1">
-            Thank you for your participation. Evaluation may take 1-2 minutes. Please do not close this page until you see a confirmation message.
+            Thank you for your participation. Please do not close this page until you see a confirmation message.
           </p>
         </div>
       )}

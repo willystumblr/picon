@@ -17,7 +17,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.env.web_interrogation_env import WebInterrogationEnv
-from src.env.evaluator_test_env import EvaluatorTestEnv
 from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
@@ -167,7 +166,7 @@ async def submit_response(request: RespondRequest):
 
 @app.get("/api/results/{session_id}", response_model=ResultsResponse)
 async def get_results(session_id: str):
-    """Get the final results for a completed interview."""
+    """Get the final results for a completed interview (without evaluation phase)."""
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found. It may have already been processed.")
     
@@ -178,40 +177,10 @@ async def get_results(session_id: str):
         if not env.is_complete:
             raise HTTPException(status_code=400, detail="Interview not yet complete")
         
-        # Run evaluation
+        # Save state (without running evaluation to avoid LLM API issues)
         logger.info(f"[{session_id}] Starting save_state...")
         results = env.save_state()
-        
-        # Run evaluator
-        logger.info(f"[{session_id}] Starting evaluator...")
-        evaluator_env = EvaluatorTestEnv(
-            model=MODEL,
-            interview_path={"session_1": results}
-        )
-        evaluator_env.reset()
-        evaluator_env.step()
-        logger.info(f"[{session_id}] Evaluator completed.")
-        
-        # Add evaluation results
-        results["external_consistency"] = {
-            "total_evaluations": evaluator_env.external_count,
-            "conflict_count": evaluator_env.external_conflict,
-            "plausible_count": evaluator_env.external_plausible,
-            "consistency_rate": (evaluator_env.external_plausible / evaluator_env.external_count) if evaluator_env.external_count > 0 else None,
-            "conflict_verdicts": evaluator_env.external_conflict_verdicts
-        }
-        results["internal_consistency"] = {
-            "total_evaluations": evaluator_env.internal_count,
-            "conflict_count": evaluator_env.internal_conflict,
-            "plausible_count": evaluator_env.internal_plausible,
-            "consistency_rate": (evaluator_env.internal_plausible / evaluator_env.internal_count) if evaluator_env.internal_count > 0 else None,
-            "conflict_verdicts": evaluator_env.internal_conflict_verdicts
-        }
-        results["abstention_eval"] = {
-            "abstention_rate": evaluator_env.abstention_rate,
-            "abstention_results": evaluator_env.abstention_results
-        }
-        results["eval_cost"] = evaluator_env.env_cost
+        logger.info(f"[{session_id}] save_state completed.")
         
         # Save to file - do this BEFORE preparing response
         result_path = f"interview_results/human_interview/{env.interviewee.name.replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"

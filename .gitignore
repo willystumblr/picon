@@ -14,9 +14,3 @@ logs/
 scripts/
 .venv/
 .gradio/
-.venv_current_node/
-
-# Frontend
-frontend/node_modules/
-frontend/.next/
-frontend/out/

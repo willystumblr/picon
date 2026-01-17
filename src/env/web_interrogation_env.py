@@ -74,8 +74,10 @@ class WebInterrogationEnv:
             self.agents['web_search'].tools = [tool.get_info() for tool in self.tools.values()]
         
         # Create a minimal interviewee object (just holds name, no input() calls)
+        # Use the name passed in kwargs, or generate a UUID if not provided
+        interviewee_name = kwargs.get('name', str(uuid.uuid4())[:8])
         self.interviewee = WebInterviewee(
-            name=str(uuid.uuid4())[:8],
+            name=interviewee_name,
             nhd_model=kwargs.get('nhd_model', 'gpt-5-nano')
         )
         
@@ -84,6 +86,8 @@ class WebInterrogationEnv:
         local_rng.shuffle(questions)
         self.predefined_questions = questions
         self.instruction = open(instruction_path).read()
+        # Load confirmation prompt from file (same as original InterrogationEnv)
+        self.confirmation_prompt = open(f"{project_root}/src/agents/prompts/confirmation_prompt.txt").read()
         self.state = State(current_turn=0, history=[])
         self.cutoff_date = time.strftime("%B %d, %Y")
         self.start_time = None
@@ -428,32 +432,6 @@ class WebInterrogationEnv:
         turn = Turn(type='repeat', agent_action=[action], environment_observation=[observation])
         self.state.history.append(turn)
         
-        # Compare with original response
-        original_response = self.state.history[self.repeat_index].environment_observation[0].response.content
-        
-        # Use LLM to judge consistency
-        while True:
-            res = get_completion(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": REPEAT_PROMPT},
-                    {"role": "user", "content": f"Question: {q['question']}\n\nResponse 1: {original_response}\nResponse 2: {response}"}
-                ],
-                reasoning_effort="low",
-            )
-            self.env_cost += completion_cost(res)
-            judge = res.choices[0].message.content.strip() if res and res.choices else None
-            if judge in ["TRUE", "FALSE"]:
-                break
-            logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
-        
-        self.repeat_results.append({
-            "question": question,
-            "original_response": original_response,
-            "repeated_response": response,
-            "is_repeat": judge
-        })
-        self.repeat_score += (judge == 'TRUE')
         
         # Move to next repeat question
         self.repeat_index += 1
@@ -522,22 +500,16 @@ class WebInterrogationEnv:
                     self.agents['evaluator'].update_memory(**sub_message[1])
                     self.agents['evaluator'].update_memory(**sub_message[2])
                     
-                    # Generate confirmation question
+                    # Generate confirmation question (same as original InterrogationEnv)
                     messages = [
                         {
                             "role": "system",
-                            "content": (
-                                "Ask a short, concise \"affirm/refute\" question if the entity that the interviewee mentioned refers to the information found in the web search results. You may provide a brief explanation about the entity based on the search results. "
-                                "Assume that no further search is available beyond the provided search results. "
-                                "If the tool `google_claim_search`'s search results are lacks all components ('title', 'link', and 'text_block') due to search failure or error, respond with a single word 'SKIP' (only one time) to indicate that no confirmation question can be generated (without explanation). "
-                                "If search results are available but 'text_block is incomplete or insufficient to form a meaningful question, use only the available information (either 'title' or 'link') to form your question. "
-                                "Generate either 'SKIP' or a single question without any additional explanation. "
-                            )
+                            "content": self.confirmation_prompt
                         },
                     ]
                     messages.extend(sub_message)
                     res = get_completion(
-                        model=self.model,
+                        model=self.questioner_model,
                         messages=messages,
                         reasoning_effort="low",
                     )
@@ -576,8 +548,6 @@ class WebInterrogationEnv:
     
     def save_state(self, termination_status: str = "Successfully completed") -> dict:
         """Save the current state."""
-        self.repeat_score = round(self.repeat_score / len(self.predefined_questions), 4) if self.predefined_questions else 0
-        
         agent_cost = sum(agent.cost for agent in self.agents.values())
         interviewee_cost = self.interviewee.cost
         tool_costs = sum(tool.calculate_cost() for tool in self.tools.values())
@@ -603,10 +573,6 @@ class WebInterrogationEnv:
             "agent_memory": {
                 agent_name: agent.memory for agent_name, agent in self.agents.items()
             },
-            "repeat": {
-                "repeat_score": self.repeat_score,
-                "repeat_results": self.repeat_results
-            }
         }
 
 

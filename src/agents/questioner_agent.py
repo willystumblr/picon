@@ -36,14 +36,7 @@ class QuestionerAgent(Agent):
         else:
             self.memory.append(kwargs) # typically role and content
 
-    def act(self, verdict: Dict = None) -> Action:
-        if verdict:
-            self.update_memory(
-                role="user",
-                content=f"[INSTRUCTION] The following is the evaluator's verdict on the previous QA, evaluating its consistency with the previous conversation history. "
-                        "You may refer to this verdict for the next question formulation.\n\n"
-                        f"Verdict: {json.dumps(verdict)}"
-            )
+    def act(self) -> Action:
         completion_kwargs = dict(
             model=self.model,
             messages=self.memory,

@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 
 # Import from src
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
 from src.env.web_interrogation_env import WebInterrogationEnv
 from src.agents.agent_factory import get_agent
@@ -90,10 +91,10 @@ def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
     }
     
     agents = {
-        "questioner": get_agent("questioner", "src/agents/prompts/questioner.txt", model=MODEL),
-        "extractor": get_agent("entity_extractor", "src/agents/prompts/entity_extractor.txt", model=MODEL),
-        "web_search": get_agent("web_search", "src/agents/prompts/websearch_prompt.txt", model=MODEL),
-        "evaluator": get_agent("evaluator", "src/agents/prompts/evaluator_prompt.txt", model=MODEL),
+        "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=MODEL),
+        "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=MODEL),
+        "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=MODEL),
+        "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=MODEL),
     }
     
     env = WebInterrogationEnv(
@@ -104,7 +105,9 @@ def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
         baseline_name="human_interview",
         name=name,
         nhd_model=NHD_MODEL,
-        question_seed=question_seed
+        question_seed=question_seed,
+        question_path=f"{project_root}/src/env/wvs_orthogonal_questions.json",
+        instruction_path=f"{project_root}/src/env/interrogation_instruct.txt"
     )
     
     return env

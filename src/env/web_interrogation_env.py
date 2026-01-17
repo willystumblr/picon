@@ -38,7 +38,10 @@ class WebInterrogationEnv:
     
     def __init__(
         self, 
-        model: str, 
+        questioner_model: str, 
+        web_search_model: str,
+        extractor_model: str,
+        evaluator_model: str,
         agents: Dict[str, Agent] = {},
         baseline_name: str = "human_interview",
         tools: Dict = {},
@@ -52,15 +55,18 @@ class WebInterrogationEnv:
         local_rng = random.Random(seed)
         
         self.tools = tools
-        self.model = model
+        self.questioner_model = questioner_model
+        self.web_search_model = web_search_model
+        self.extractor_model = extractor_model
+        self.evaluator_model = evaluator_model
         
         if not agents:
             logging.warning("No agents provided. Initializing default agents.")
             agents = {
-                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=model),
-                "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=model),
-                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=model),
-                "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=model),
+                "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=questioner_model),
+                "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=extractor_model),
+                "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=web_search_model),
+                "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=evaluator_model),
             }
         self.agents = agents
         
@@ -70,7 +76,7 @@ class WebInterrogationEnv:
         # Create a minimal interviewee object (just holds name, no input() calls)
         self.interviewee = WebInterviewee(
             name=str(uuid.uuid4())[:8],
-            nhd_model=kwargs.get('nhd_model', 'gpt-5')
+            nhd_model=kwargs.get('nhd_model', 'gpt-5-nano')
         )
         
         self.max_turns = max_turns

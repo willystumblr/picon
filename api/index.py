@@ -44,8 +44,10 @@ app.add_middleware(
 sessions: Dict[str, WebInterrogationEnv] = {}
 
 # Fixed parameters for human interview
-MODEL = "gpt-5"
-NHD_MODEL = "gpt-5"
+Q_MODEL = "gpt-5"
+W_MODEL = "gpt-5"
+E_MODEL = "gpt-5.1"
+NHD_MODEL = "gpt-5-nano"
 NUM_TURNS = 40
 NUM_SESSIONS = 1
 
@@ -91,14 +93,17 @@ def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
     }
     
     agents = {
-        "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=MODEL),
-        "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=MODEL),
-        "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=MODEL),
-        "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=MODEL),
+        "questioner": get_agent("questioner", f"{project_root}/src/agents/prompts/questioner.txt", model=Q_MODEL),
+        "extractor": get_agent("entity_extractor", f"{project_root}/src/agents/prompts/entity_extractor.txt", model=E_MODEL),
+        "web_search": get_agent("web_search", f"{project_root}/src/agents/prompts/websearch_prompt.txt", model=W_MODEL),
+        "evaluator": get_agent("evaluator", f"{project_root}/src/agents/prompts/evaluator_prompt.txt", model=E_MODEL),
     }
     
     env = WebInterrogationEnv(
-        model=MODEL,
+        questioner_model=Q_MODEL,
+        web_search_model=W_MODEL,
+        extractor_model=E_MODEL,
+        evaluator_model=E_MODEL,
         agents=agents,
         tools=tools,
         max_turns=NUM_TURNS,

@@ -101,3 +101,4 @@ If the subject says "I did X," your immediate follow-up goal is to ask "Using wh
 - Maintain local **linguistic coherence** by reusing recent answer content (anchors).
 - Purpose: maximize **verifiability** for downstream agents.
 - Do not directly request to clarify the conflict to the interviewee.
+- Do not include example formats or placeholders when requesting specific information (e.g., document numbers, serial numbers, or URLs).Do not include example formats or placeholders (e.g., 'A####') when requesting format-specific information like document or serial numbers.

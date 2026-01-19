@@ -43,12 +43,17 @@ class EvaluatorTestEnv:
         
         # Build histories as List[List[Turn]] for evaluator.act()
         self.histories = []
-        for session_id in ['session_'+str(i+1) for i in range(self.num_sessions)]:
-            if session_id in self.all_data:
-                session_data = self.all_data[session_id]
-                # Convert dict history to Turn objects
-                history = [Turn(**turn) for turn in session_data['history']]
-                self.histories.append(history)
+        if "session_1" in self.all_data:
+            for session_id in ['session_'+str(i+1) for i in range(self.num_sessions)]:
+                if session_id in self.all_data:
+                    session_data = self.all_data[session_id]
+                    # Convert dict history to Turn objects
+                    history = [Turn(**turn) for turn in session_data['history']]
+                    self.histories.append(history)
+        else:
+            history = [Turn(**turn) for turn in self.all_data['history']]
+            self.histories.append(history)
+
         # Initialize the evaluator agent with model and memory from the saved data
         self.evaluator = get_agent(
             "evaluator",
@@ -129,7 +134,8 @@ class EvaluatorTestEnv:
                 "interview": self.interview_path,
                 "total_cost": self.env_cost,
                 "duration": f"{(time.time() - self.start_time)/60:.2f} minutes",
-                "evaluation": self.evaluation_results
+                "evaluation": self.evaluation_results, 
+                "evaluation_model": self.model,
             }
             
             logging.info(f"Saving final result to {path}")

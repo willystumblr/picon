@@ -11,7 +11,8 @@ import requests
 from rank_bm25 import BM25Okapi
 import cloudscraper
 
-TOP_K_RESULTS = 1         # how many search results to fetch        # how many passages to return
+TOP_K_RESULTS = 5         # how many search results to fetch (for fallback)
+MAX_SUCCESSFUL_PAGES = 1  # how many successfully fetched pages to return
 _PAT = re.compile(r"(content|main|article|body|post)", re.I)
 _SPLIT_RE = re.compile(r"\n{2,}")          # paragraph boundary = ≥2 new-lines
 _TOKEN_RE = re.compile(r"\w+")
@@ -227,34 +228,54 @@ class GoogleClaimSearch(BaseModel):
             items = resp.json().get("items", [])
 
             results: List[Dict[str, Any]] = []
+            failed_attempts: List[Dict[str, str]] = []  # Track failed URLs for debugging
+            successful_count = 0
+            
             for it in items:
+                # Stop if we have enough successful results
+                if successful_count >= MAX_SUCCESSFUL_PAGES:
+                    break
+                    
                 url = it.get("link")
                 if not url:
                     continue
 
                 fetched = self._fetch(url)
                 if "error" in fetched:
-                    results.append({"query" : q, "title": fetched["title"], "link": url, "gl" : gl,
-                                    "text_block": [fetched["error"]]})
+                    # Don't return error immediately, track it and try next URL
+                    failed_attempts.append({"url": url, "error": fetched["error"]})
                     continue
+                    
                 passages = _split_passages(fetched["cleaned"])
+                if not passages or all(not p.strip() for p in passages):
+                    # No meaningful content extracted, try next URL
+                    failed_attempts.append({"url": url, "error": "No meaningful content extracted"})
+                    continue
+                    
                 top_passages = _top_passages(claim, passages)
+                if not top_passages or all(not p.strip() for p in top_passages):
+                    # No relevant passages found, try next URL
+                    failed_attempts.append({"url": url, "error": "No relevant passages found"})
+                    continue
+                    
                 results.append({
                     'query': q,
                     "title": fetched["title"],
                     "link": url,
-                    "gl" : gl,
-                    "text_block": top_passages})
+                    "gl": gl,
+                    "text_block": top_passages
+                })
+                successful_count += 1
                 
-                
-                
+            # Only return error if ALL URLs failed
             if not results:
+                error_details = "; ".join([f"{fa['url']}: {fa['error']}" for fa in failed_attempts[:3]])
                 results = [{
                     "query": q,
                     "title": "",
                     "link": "",
-                    "gl" : gl,
-                    "text_block": ["No text could be extracted from the top results."]
+                    "gl": gl,
+                    "text_block": [f"Failed to extract text from all {len(failed_attempts)} URLs tried. Details: {error_details}"]
                 }]
             return json.dumps(results, ensure_ascii=False)
 
@@ -270,8 +291,8 @@ class GoogleClaimSearch(BaseModel):
                 "name": "google_claim_search",
                 "description": (
                     "Given a factual `claim`, run Google Custom Search with the query (keyword) `q` and `gl`, "
-                    f"crawl the top {TOP_K_RESULTS} result pages, and return a list of their plain texts "
-                    "as a JSON string."
+                    f"crawl search result pages (trying up to {TOP_K_RESULTS} URLs with fallback on failure), "
+                    "and return extracted plain texts as a JSON string."
                 ),
                 "parameters": {
                     "type": "object",
@@ -324,33 +345,47 @@ class GoogleClaimSearch(BaseModel):
             self.tool_call_counts += 1
             items = resp.json().get("items", [])
 
-            # Fetch all pages once
+            # Fetch pages with fallback - try URLs until we get content
             all_passages: List[str] = []
             page_info: List[Dict[str, Any]] = []
+            failed_attempts: List[Dict[str, str]] = []
+            successful_count = 0
             
             for it in items:
+                # Stop if we have enough successful results
+                if successful_count >= MAX_SUCCESSFUL_PAGES:
+                    break
+                    
                 url = it.get("link")
                 if not url:
                     continue
 
                 fetched = self._fetch(url)
                 if "error" in fetched:
-                    page_info.append({"title": fetched["title"], "link": url, "error": fetched["error"]})
+                    # Track failure and try next URL
+                    failed_attempts.append({"url": url, "error": fetched["error"]})
                     continue
                     
                 passages = _split_passages(fetched["cleaned"])
+                if not passages or all(not p.strip() for p in passages):
+                    # No meaningful content, try next URL
+                    failed_attempts.append({"url": url, "error": "No meaningful content extracted"})
+                    continue
+                
                 all_passages.extend(passages)
                 page_info.append({"title": fetched["title"], "link": url})
+                successful_count += 1
 
             # For each claim, find the most relevant passages
-            
             passages_set = []
             if not all_passages:
+                error_details = "; ".join([f"{fa['url']}: {fa['error']}" for fa in failed_attempts[:3]])
                 results = [{
                         "query": q,
                         "gl": gl,
                         "pages": page_info,
-                        "text_block": ["No text could be extracted from the top results."]
+                        "failed_attempts": len(failed_attempts),
+                        "text_block": [f"Failed to extract text from all {len(failed_attempts)} URLs tried. Details: {error_details}"]
                     }]
             else:
                 for claim in claims:

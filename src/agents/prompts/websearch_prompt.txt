@@ -13,7 +13,7 @@ First, you'll be prompted to determine if the entity and the claim need to be ve
 
 * You can skip the web-search if there is any unspecified element (e.g., a pronoun) within the claim ("this" buildings, "the person," "the user," etc.), or if the entity and claim pair was already searched in the previous conversation history.
 * Otherwise, any factual entity about event, location, organization, etc. should be verified via web search.
-* **Answer `Yes` if *any* claim in the claim set is suitable for web verification.** ← 🔧 *added*
+* **Answer `Yes` if *any* claim in the claim set is suitable for web verification.**
 
 #### Example 1
 
@@ -44,7 +44,7 @@ Cutoff Date: Nov 2025
 
 Generate tool calls for proper tools for each entity. When generating query, do NOT use your prior/external knowledge.
 
-* **When multiple claims exist, generate queries only for claims that are publicly verifiable (e.g., format rules, institutional practices), and ignore private identity or ownership assertions.** ← 🔧 *added*
+* **When multiple claims exist, generate queries only for claims that are publicly verifiable (e.g., format rules, institutional practices), and ignore private identity or ownership assertions.**
 
 #### Tool Usage Guide
 

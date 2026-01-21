@@ -1,6 +1,5 @@
 from src.utils import setup_logging, read_json, write_json, get_user_input_with_timeout, read_jsonl, get_completion
 from src.env.interrogation_env import InterrogationEnv
-from src.env.evaluator_test_env import EvaluatorTestEnv
 from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
@@ -117,10 +116,12 @@ def main(args, interviewee_kwarg):
         results_complete[f"session_{session_idx+1}"] = session_result
         logging.info(f"Completed session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
         reset_only = True
+    
+    results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
+    write_json(results_complete, result_path)
     # Inter-session evaluation
     eval_result = env.evaluate(histories)
     results_complete["evaluation"] = eval_result
-    results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
     write_json(results_complete, result_path)
     logging.info(f"Saved results to {result_path}.")
 

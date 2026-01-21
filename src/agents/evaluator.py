@@ -69,7 +69,7 @@ class EvaluatorAgent(Agent):
                     "affirmativeness_score": 0.0,
                     "consistency_score": 0.0,
                 },
-                'irrelevant': {
+                'inconclusive': {
                     "count": 0,
                     "details": []
                 },
@@ -138,10 +138,20 @@ class EvaluatorAgent(Agent):
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
             completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
-        response = get_completion(**completion_kwargs)
-        self._calculate_cost(response)
-        parsed_response = UncooperativeResponse.model_validate_json(response.choices[0].message.content)
-        return parsed_response
+        
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = get_completion(**completion_kwargs)
+                self._calculate_cost(response)
+                parsed_response = UncooperativeResponse.model_validate_json(response.choices[0].message.content)
+                return parsed_response
+            except ValidationError as e:
+                if attempt == max_retries - 1:
+                    logging.error(f"Pydantic validation failed after {max_retries} attempts: {e}")
+                    raise
+                logging.warning(f"Pydantic validation failed for UncooperativeResponse, retrying... ({attempt + 1}/{max_retries})")
+                continue
     
     def __generate_affirmative_check(self, qa_pair: Dict[str, Any]):
         """Check if the answer affirms the search result (Step 2 - only for confirmation questions)"""
@@ -167,10 +177,20 @@ class EvaluatorAgent(Agent):
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
             completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
-        response = get_completion(**completion_kwargs)
-        self._calculate_cost(response)
-        parsed_response = AffirmativeResponse.model_validate_json(response.choices[0].message.content)
-        return parsed_response
+        
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = get_completion(**completion_kwargs)
+                self._calculate_cost(response)
+                parsed_response = AffirmativeResponse.model_validate_json(response.choices[0].message.content)
+                return parsed_response
+            except ValidationError as e:
+                if attempt == max_retries - 1:
+                    logging.error(f"Pydantic validation failed after {max_retries} attempts: {e}")
+                    raise
+                logging.warning(f"Pydantic validation failed for AffirmativeResponse, retrying... ({attempt + 1}/{max_retries})")
+                continue
     
     def __generate_internal_consistency_verdict(self, qa_history: str, current_question: str, current_response: str, log_prompt: bool = False):
         """Generate internal consistency verdict (conflict/plausible) using previous Q&A without tool outputs"""
@@ -199,23 +219,31 @@ class EvaluatorAgent(Agent):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
             completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
         
-        response = get_completion(**completion_kwargs)
-        self._calculate_cost(response)
-        parsed_response = InternalVerdictResponseFormat.model_validate_json(response.choices[0].message.content)
-        
-        return parsed_response
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = get_completion(**completion_kwargs)
+                self._calculate_cost(response)
+                parsed_response = InternalVerdictResponseFormat.model_validate_json(response.choices[0].message.content)
+                return parsed_response
+            except ValidationError as e:
+                if attempt == max_retries - 1:
+                    logging.error(f"Pydantic validation failed after {max_retries} attempts: {e}")
+                    raise
+                logging.warning(f"Pydantic validation failed for InternalVerdictResponseFormat, retrying... ({attempt + 1}/{max_retries})")
+                continue
     
     def __generate_external_consistency_verdict(self, affirmed_search_results: List[str], current_question: str, current_response: str, log_prompt: bool = False):
-        """Generate external consistency verdict (irrelevant/plausible/conflict) using affirmed search results"""
+        """Generate external consistency verdict (inconclusive/plausible/conflict) using affirmed search results"""
         class ExternalVerdictResponseFormat(BaseModel):
-            verdict: Literal['irrelevant', 'plausible', 'conflict']
+            verdict: Literal['inconclusive', 'plausible', 'conflict']
             rationale: str = Field(..., description="The rationale behind the verdict")
         
         search_results_str = "Affirmed Search Results:\n" + "\n\n".join(affirmed_search_results)
         current_qa_str = f"\n\nCurrent Question: {current_question}\nCurrent Response: {current_response}"
         user_content = search_results_str + current_qa_str + """\n\nBased on the affirmed search results above, classify the Current Response into one of three categories:
 
-1. **irrelevant**: The Q&A is completely unrelated to all affirmed search results. There is no overlapping information at all.
+1. **inconclusive**: The Q&A is completely unrelated to all affirmed search results. There is no overlapping information at all.
 2. **conflict**: The answer contradicts or is inconsistent with at least one affirmed search result.
 3. **plausible**: The answer is related to some affirmed search results but does not conflict with them.
 
@@ -240,11 +268,25 @@ Determine which category best fits the Current Response."""
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
             completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
         
-        response = get_completion(**completion_kwargs)
-        self._calculate_cost(response)
-        parsed_response = ExternalVerdictResponseFormat.model_validate_json(response.choices[0].message.content)
-        
-        return parsed_response
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = get_completion(**completion_kwargs)
+                self._calculate_cost(response)
+                raw_content = response.choices[0].message.content
+
+                if raw_content is None:
+                    logging.warning(f"API returned None. Finish reason: {response.choices[0].finish_reason}")
+                    raise ValueError("API returned None content")
+                
+                parsed_response = ExternalVerdictResponseFormat.model_validate_json(raw_content)
+                return parsed_response
+            except (ValidationError, ValueError) as e:
+                if attempt == max_retries - 1:
+                    logging.error(f"Pydantic validation failed after {max_retries} attempts: {e}")
+                    raise
+                logging.warning(f"Pydantic validation failed for ExternalVerdictResponseFormat, retrying... ({attempt + 1}/{max_retries})")
+                continue
     
     def _extract_tool_output_str(self, tool_output: 'ToolOutput') -> str:
         """Extract tool output string including claims and output."""
@@ -424,7 +466,7 @@ Determine which category best fits the Current Response."""
                 item, idx = args
                 return self.__generate_internal_consistency_verdict(item['qa_history'], item['question'], item['response'], log_prompt=(idx < 3))
             
-            with ThreadPoolExecutor(max_workers=16) as executor:
+            with ThreadPoolExecutor(max_workers=2) as executor:
                 internal_results = list(tqdm(executor.map(generate_internal_wrapper, [(item, idx) for idx, item in enumerate(consistency_eval_items)]), 
                                             total=len(consistency_eval_items), 
                                             desc="Internal consistency check"))
@@ -477,9 +519,9 @@ Determine which category best fits the Current Response."""
                 user_response = item['response']
                 is_confirmation = item['is_confirmation']
                 
-                if external_verdict.verdict == 'irrelevant':
-                    self.results_dict['external']['irrelevant']['count'] += 1
-                    self.results_dict['external']['irrelevant']['details'].append({
+                if external_verdict.verdict == 'inconclusive':
+                    self.results_dict['external']['inconclusive']['count'] += 1
+                    self.results_dict['external']['inconclusive']['details'].append({
                         'turn_index': turn_idx,
                         'question': question,
                         'response': user_response,
@@ -542,7 +584,7 @@ Determine which category best fits the Current Response."""
         get_to_knows = [turn for turn in history if turn.type == 'get_to_know']
         repeats = [turn for turn in history if turn.type == 'repeat']
         for original, repeat in zip(get_to_knows, repeats):
-            assert original.environment_observation[0].response.question in repeat.environment_observation[0].response.question, "Mismatch in questions between original and repeat."
+            assert original.environment_observation[0].response.question in repeat.environment_observation[0].response.question, f"Mismatch in questions between original and repeat. Original: '{original.environment_observation[0].response.question}', Repeat: '{repeat.environment_observation[0].response.question}'."
             
             completion_kwargs = dict(
                 model=self.model,

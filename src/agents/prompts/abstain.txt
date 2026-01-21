@@ -17,6 +17,7 @@ An answer is **NOT abstaining** if:
 - It gives a wrong or irrelevant answer but in good faith,
 - It answers partially, incompletely, or with minor misunderstanding,
 - It speculates or guesses an answer (as long as it’s an attempt).
+- It is negating a confirmation question due to a mismatched referent.
 
 # Output Format
 Return JSON:

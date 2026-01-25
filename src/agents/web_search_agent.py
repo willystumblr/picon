@@ -32,70 +32,71 @@ class WebSearchAgent(Agent):
         entity = message.get('entity', 'no entity')
         claims = message.get('claims', ['no claim'])
         rationale = message.get('rationale', '')
-        if entity and entity != 'no entity':
-            prompt_format = f"Does the following entity-claims pair need to be verified with web-search?\nEntity: {entity}\nClaims: {claims}\n\nRationale: {rationale}\nCutoff Date: {self.cutoff_date}"
-        elif entity == 'no entity':
-            prompt_format = f"Does the following claim need to be verified with web-search?\nClaim: {claims}\nCutoff Date: {self.cutoff_date}"
-        while True:
-            class ResponseFormat(BaseModel):
-                type: Literal["yes", "no"]
-            prompt = f"Conversation History:\n\n"
-            for qa in history:
-                prompt += f"Interviewer: \"{qa['question']}\"\nInterviewee: \"{qa['answer']}\"\n\n"
-            prompt += prompt_format
-            completion_kwargs = dict(
-                model=self.model,
-                messages=self.memory + [{"role": "user", "content": prompt}],
-                reasoning_effort="low",
-                response_format=ResponseFormat,
-            )
-            if self.model.startswith("hosted_vllm/"):
-                assert self.port is not None, "Port must be specified for hosted_vllm models."    
-                completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
-            elif self.model.startswith("claude-"):
-                completion_kwargs['thinking'] = {"type": "enabled", "budget_tokens":1024}
-                completion_kwargs.pop('reasoning_effort') # claude does not support reasoning_effort
-            res = get_completion(**completion_kwargs)
-            self._calculate_cost(res)
-            proceed_to_web_search = ResponseFormat.model_validate_json(res.choices[0].message.content).type.lower()
-            if proceed_to_web_search in ['yes', 'no']:
-                break
+        # if entity and entity != 'no entity':
+        #     prompt_format = f"Does the following entity-claims pair need to be verified with web-search?\nEntity: {entity}\nClaims: {claims}\n\nRationale: {rationale}\nCutoff Date: {self.cutoff_date}"
+        # elif entity == 'no entity':
+        #     prompt_format = f"Does the following claim need to be verified with web-search?\nClaim: {claims}\nCutoff Date: {self.cutoff_date}"
+        prompt = f"Conversation History:\n\n"
+        for qa in history:
+            prompt += f"Interviewer: \"{qa['question']}\"\nInterviewee: \"{qa['answer']}\"\n\n"
+        # prompt += prompt_format
+        # while True:
+        #     class ResponseFormat(BaseModel):
+        #         type: Literal["yes", "no"]
+            
+        #     completion_kwargs = dict(
+        #         model=self.model,
+        #         messages=self.memory + [{"role": "user", "content": prompt}],
+        #         reasoning_effort="low",
+        #         response_format=ResponseFormat,
+        #     )
+        #     if self.model.startswith("hosted_vllm/"):
+        #         assert self.port is not None, "Port must be specified for hosted_vllm models."    
+        #         completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
+        #     elif self.model.startswith("claude-"):
+        #         completion_kwargs['thinking'] = {"type": "enabled", "budget_tokens":1024}
+        #         completion_kwargs.pop('reasoning_effort') # claude does not support reasoning_effort
+        #     res = get_completion(**completion_kwargs)
+        #     self._calculate_cost(res)
+        #     proceed_to_web_search = ResponseFormat.model_validate_json(res.choices[0].message.content).type.lower()
+        #     if proceed_to_web_search in ['yes', 'no']:
+        #         break
 
-        if proceed_to_web_search == 'yes': # , and the claim: {claim}, with rationale: {rationale}
-            prompt = f"Search {entity} with a proper tool.\nClaims for this entity are as follows: {claims}\nRationale for this entity is as follows: <{rationale}>" if entity and entity!="no entity" else f"Search the claim: {claims} with a proper tool."
-            completion_kwargs = dict(
-                model=self.model,
-                messages=self.memory + [{"role": "user", "content": prompt}], # no memory needed
-                tool_choice="required",
-                tools=self.tools,
-                reasoning_effort="low",
-                parallel_tool_calls=False,
-            )
-            if self.model.startswith("hosted_vllm/"):
-                assert self.port is not None, "Port must be specified for hosted_vllm models."    
-                completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
-            elif self.model.startswith("claude-"):
-                # completion_kwargs['thinking'] = {"type": "enabled", "budget_tokens":1024}
-                completion_kwargs.pop('reasoning_effort') # claude does not support reasoning_effort
-                
-            res = get_completion(**completion_kwargs)
-            self._calculate_cost(res)
-            res_ = res.choices[0].message.model_dump()
-            if 'tool_calls' in res_ and res_['tool_calls']:
-                tool_call = res_['tool_calls'][0]
-                tool_name = tool_call['function']['name']
-                arguments = json.loads(tool_call['function']['arguments'])
-                if claims and tool_name == 'google_claim_search':
-                    arguments['claims'] = claims
-                return Action(
-                    agent=self.role,
-                    action_type="tool_call",
-                    tool_call=ToolCall(
-                        tool_name=tool_name,
-                        arguments=arguments,
-                        details=res_
-                    )
+        # if proceed_to_web_search == 'yes': # , and the claim: {claim}, with rationale: {rationale}
+        prompt += f"\n\nSearch {entity} with a proper tool.\nClaims for this entity are as follows: {claims}\nRationale for this entity is as follows: <{rationale}>" if entity and entity!="no entity" else f"Search the claim: {claims} with a proper tool."
+        completion_kwargs = dict(
+            model=self.model,
+            messages=self.memory + [{"role": "user", "content": prompt}], # no memory needed
+            tool_choice="required",
+            tools=self.tools,
+            reasoning_effort="low",
+            parallel_tool_calls=False,
+        )
+        if self.model.startswith("hosted_vllm/"):
+            assert self.port is not None, "Port must be specified for hosted_vllm models."    
+            completion_kwargs['api_base'] = f"http://localhost:{self.port}/v1"
+        elif self.model.startswith("claude-"):
+            # completion_kwargs['thinking'] = {"type": "enabled", "budget_tokens":1024}
+            completion_kwargs.pop('reasoning_effort') # claude does not support reasoning_effort
+            
+        res = get_completion(**completion_kwargs)
+        self._calculate_cost(res)
+        res_ = res.choices[0].message.model_dump()
+        if 'tool_calls' in res_ and res_['tool_calls']:
+            tool_call = res_['tool_calls'][0]
+            tool_name = tool_call['function']['name']
+            arguments = json.loads(tool_call['function']['arguments'])
+            if claims and tool_name == 'google_claim_search':
+                arguments['claims'] = claims
+            return Action(
+                agent=self.role,
+                action_type="tool_call",
+                tool_call=ToolCall(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    details=res_
                 )
-        else:
-            logging.warning(f"WebSearchAgent decided no web search needed for entity: {entity}, claims: {claims}.")
-            return None
+            )
+        # else:
+        #     logging.warning(f"WebSearchAgent decided no web search needed for entity: {entity}, claims: {claims}.")
+        #     return None

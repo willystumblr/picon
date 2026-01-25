@@ -196,7 +196,7 @@ class GoogleClaimSearch(BaseModel):
             return {"title": "", "error": f"[Error fetching] {e}"}
     
     # ------------- tool entry point -------------
-    def invoke_single(self, claim: str, q: str, gl: str) -> str:
+    def invoke_single(self, claim: str, q: str, gl: str, exactTerms: None) -> str:
         """
         Parameters
         ----------
@@ -222,6 +222,8 @@ class GoogleClaimSearch(BaseModel):
                 "num": TOP_K_RESULTS, # top 5 results
                 "gl": gl,             # geolocation
             }
+            if exactTerms:
+                q_params["exactTerms"] = exactTerms
             resp = requests.get(search_url, params=q_params, timeout=6)
             resp.raise_for_status()
             self.tool_call_counts += 1
@@ -246,18 +248,23 @@ class GoogleClaimSearch(BaseModel):
                     failed_attempts.append({"url": url, "error": fetched["error"]})
                     continue
                     
+                # Treat '[content-extraction-failed]' as a failure
+                if fetched["cleaned"].strip() == "[content-extraction-failed]":
+                    failed_attempts.append({"url": url, "error": "[content-extraction-failed]"})
+                    continue
+
                 passages = _split_passages(fetched["cleaned"])
                 if not passages or all(not p.strip() for p in passages):
                     # No meaningful content extracted, try next URL
                     failed_attempts.append({"url": url, "error": "No meaningful content extracted"})
                     continue
-                    
+
                 top_passages = _top_passages(claim, passages)
                 if not top_passages or all(not p.strip() for p in top_passages):
                     # No relevant passages found, try next URL
                     failed_attempts.append({"url": url, "error": "No relevant passages found"})
                     continue
-                    
+
                 results.append({
                     'query': q,
                     "title": fetched["title"],
@@ -280,7 +287,7 @@ class GoogleClaimSearch(BaseModel):
             return json.dumps(results, ensure_ascii=False)
 
         except Exception as outer:
-            return json.dumps([{"query" : q, "title": "", "link":"", "gl" : gl, "text_block":f"Search failure: {outer}"}], ensure_ascii=False)
+            return json.dumps([{"query" : q, "exactTerms": "", "title": "", "link":"", "gl" : gl, "text_block":f"Search failure: {outer}"}], ensure_ascii=False)
 
     # ------------- schema that LiteLLM exports -------------
     @staticmethod
@@ -290,7 +297,7 @@ class GoogleClaimSearch(BaseModel):
             "function": {
                 "name": "google_claim_search",
                 "description": (
-                    "Given a factual `claim`, run Google Custom Search with the query (keyword) `q` and `gl`, "
+                    "Given a factual `claim`, run Google Custom Search with the query (keyword) `q`, `gl`, and `exactTerms` (optional), "
                     f"crawl search result pages (trying up to {TOP_K_RESULTS} URLs with fallback on failure), "
                     "and return extracted plain texts as a JSON string."
                 ),
@@ -299,19 +306,23 @@ class GoogleClaimSearch(BaseModel):
                     "properties": {
                         "q": {
                             "type": "string",
-                            "description": "Query; a keyword that needs to be searched for fact verification."
+                            "description": "Query; a keyword that needs to be searched for fact verification. Do not include quotation marks.",
                         },
                         "gl": {
                             "type": "string",
                             "description": "Geolocation of end user. The country code (e.g., 'us', 'uk', 'ca', 'jp', 'kr') to tailor search results to a specific region.",
                         },
+                        "exactTerms": {
+                            "type": "string",
+                            "description": "Exact terms to match in the search results for fact verification. Do not include quotation marks."
+                        },
                     },
-                    "required": ["q", "gl"] #, "exactTerms", ],
+                    "required": ["q", "gl", "exactTerms", ],
                 },
             },
         }
         
-    def invoke(self, claims: List[str], q: str, gl: str) -> str:
+    def invoke(self, claims: List[str], q: str, gl: str, exactTerms: str = None) -> str:
         """
         Process multiple claims with the same query and geolocation.
         
@@ -366,12 +377,17 @@ class GoogleClaimSearch(BaseModel):
                     failed_attempts.append({"url": url, "error": fetched["error"]})
                     continue
                     
+                # Treat '[content-extraction-failed]' as a failure
+                if fetched["cleaned"].strip() == "[content-extraction-failed]":
+                    failed_attempts.append({"url": url, "error": "[content-extraction-failed]"})
+                    continue
+
                 passages = _split_passages(fetched["cleaned"])
                 if not passages or all(not p.strip() for p in passages):
                     # No meaningful content, try next URL
                     failed_attempts.append({"url": url, "error": "No meaningful content extracted"})
                     continue
-                
+
                 all_passages.extend(passages)
                 page_info.append({"title": fetched["title"], "link": url})
                 successful_count += 1

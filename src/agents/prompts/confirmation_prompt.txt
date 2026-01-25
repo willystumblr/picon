@@ -16,6 +16,9 @@ Would you confirm that the entity you mentioned is [Entity Name], the [most spec
 (Example: "Would you confirm that the entity you mentioned is The Eiffel Tower, the wrought-iron lattice tower on the Champ de Mars in Paris?")
 
 # Constraints and Output Format
-If the tool's search results are missing all components ('title', 'link', and 'text_block') due to search failure or error, respond with the single word 'SKIP' (only one time) to indicate that no confirmation question can be generated (without explanation).
-If search results are available but the 'text_block' is incomplete or insufficient to form a meaningful question, use only the available information (either 'title' or 'link') to form your question.
-Generate either 'SKIP' or a single question without any additional explanation.
+- If the search results contain the error message `Failed to extract text from all 0 URLs tried`:
+  This indicates the entity may not exist or is highly obscure. Do NOT reveal this technical error. Instead, challenge the interviewee by asking: "Are you certain the entity [Entity Name] ... [What the interviewee has stated earlier about the entity]?"
+  (Example: "Are you certain the entity Peet's Coffee is the only coffee shop at Sather Gate?")
+  
+- If the search results contain the error message `Failed to extract text from all N URLs tried` (where N ≥ 1) or any contents indicating text crawling failure (e.g., access denial, `403 Forbidden`, `404 Not Found`):
+  This indicates a technical failure of the search tool rather than a non-existent entity. In this case, you must not attempt a question. Generate only the single word: SKIP

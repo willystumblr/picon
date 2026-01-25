@@ -16,8 +16,9 @@ Generate tool calls for proper tools for each entity. When generating query, do 
 | Looks like a *postal* address | google_geocode_validate | JSON → [{ "status": "valid", "matched_address": "...", "lat": …, "lng": … } or { "status": "invalid", "candidates": [ ... ] }] |
 | Anything else                 | google_claim_search     | A list of passages crawled from top Google results                                                                             |
 
-* IMPORTANT: Use `google_geocode_validate` only when the entity appears to be a **full postal address**; for any other claim (e.g., confirming that Philadelphia is in Pennsylvania), use google_claim_search instead.
-
+* IMPORTANT: 
+- Use `google_geocode_validate` only when the entity appears to be a **full postal address**; for any other claim (e.g., confirming that Philadelphia is in Pennsylvania), use google_claim_search instead.
+- When using `google_claim_search`, specify `gl` considering the context of conversation history and the interviewee's (i.e., the end user's) background.
 ---
 
 ### Query Guide

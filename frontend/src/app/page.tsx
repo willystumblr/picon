@@ -1,73 +1,69 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useLanguage } from '@/hooks/useLanguage';
+import { Language } from '@/types/consent';
+import { setConsentState } from '@/lib/storage';
 
 export default function Home() {
-  const [name, setName] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
   const router = useRouter();
+  const { language, setLanguage, t } = useLanguage();
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
 
-  const handleStart = async (e: React.FormEvent) => {
+  const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setError('Please enter your name');
+      setError(t.home.errorName);
       return;
     }
 
-    setIsLoading(true);
-    setError('');
+    // Store name and language in consent state
+    setConsentState({
+      language,
+      name: name.trim(),
+      currentStep: 0,
+      consentsGiven: Array(6).fill(false),
+      timestamp: new Date().toISOString(),
+    });
 
-    try {
-      const response = await fetch('/api/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to start interview');
-      }
-
-      const data = await response.json();
-      
-      // Store session data in sessionStorage
-      sessionStorage.setItem('interviewSession', JSON.stringify({
-        sessionId: data.session_id,
-        instruction: data.instruction,
-        currentQuestion: data.first_question,
-        phase: data.phase,
-        progress: data.progress,
-        name: name.trim(),
-      }));
-
-      router.push('/interview');
-    } catch (err) {
-      setError('Failed to start interview. Please try again.');
-      console.error(err);
-    } finally {
-      setIsLoading(false);
-    }
+    // Navigate to consent flow
+    router.push('/consent');
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8">
+    <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-gradient-to-b from-gray-50 to-gray-100">
       <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
         <h1 className="text-2xl font-bold text-center mb-6 text-gray-800">
-          Human Interview Study
+          {t.home.title}
         </h1>
-        
+
         <p className="text-gray-600 mb-6 text-sm">
-          Welcome! This interview will take approximately 1 hour. You will be asked 
-          around 70 questions about yourself. Please answer honestly - you may decline 
-          to answer any question that makes you uncomfortable.
+          {t.home.description}
         </p>
 
         <form onSubmit={handleStart} className="space-y-4">
+          {/* Language Selection */}
+          <div>
+            <label htmlFor="language" className="block text-sm font-medium text-gray-700 mb-1">
+              {t.common.language}
+            </label>
+            <select
+              id="language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as Language)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition bg-white"
+            >
+              <option value="en">English</option>
+              <option value="ko">한국어 (Korean)</option>
+            </select>
+          </div>
+
+          {/* Name Input */}
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-              Your Name
+              {t.home.nameLabel}
             </label>
             <input
               type="text"
@@ -75,8 +71,7 @@ export default function Home() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-              placeholder="Enter your name"
-              disabled={isLoading}
+              placeholder={t.home.namePlaceholder}
             />
           </div>
 
@@ -86,25 +81,14 @@ export default function Home() {
 
           <button
             type="submit"
-            disabled={isLoading}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? (
-              <span className="flex items-center justify-center">
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Starting...
-              </span>
-            ) : (
-              'Start Interview'
-            )}
+            {t.home.continueButton}
           </button>
         </form>
 
         <p className="mt-6 text-xs text-gray-500 text-center">
-          ⚠️ Please do not reload or close this page during the interview.
+          {t.home.privacyNote}
         </p>
       </div>
     </main>

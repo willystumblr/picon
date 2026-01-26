@@ -52,7 +52,7 @@ class WebInterrogationEnv:
     ):
         # Random seed for reproducibility
         seed = kwargs.get('question_seed', 42)
-        local_rng = random.Random(seed)
+        # local_rng = random.Random(seed)
         
         self.tools = tools
         self.questioner_model = questioner_model
@@ -83,7 +83,7 @@ class WebInterrogationEnv:
         
         self.max_turns = max_turns
         questions = read_json(question_path)
-        local_rng.shuffle(questions)
+        random.shuffle(questions)
         self.predefined_questions = questions
         self.instruction = open(instruction_path).read()
         # Load confirmation prompt from file (same as original InterrogationEnv)

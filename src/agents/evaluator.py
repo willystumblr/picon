@@ -269,11 +269,31 @@ class EvaluatorAgent(Agent):
         output_str = f"Output: {tool_output.output}"
         return claims_str + output_str
     
-    def _extract_search_result_info(self, tool_output: 'ToolOutput') -> Dict[str, Any]:
-        """Extract search result info for external evaluation."""
+    def _extract_search_result_info(self, tool_output: 'ToolOutput', agent_actions: List[Action] = None) -> Dict[str, Any]:
+        """Extract search result info for external evaluation.
+        
+        Claims are stored in agent_action.tool_call.arguments, not in tool_output.arguments.
+        We need to match by tool_call_id to find the corresponding claims.
+        """
         claims = []
-        if tool_output.arguments and 'claims' in tool_output.arguments:
+        
+        # First try to get claims from agent_actions using tool_call_id matching
+        if agent_actions and tool_output.tool_call_id:
+            for action in agent_actions:
+                if (action.tool_call and 
+                    action.tool_call.details and 
+                    action.tool_call.details.get('tool_calls')):
+                    for tc in action.tool_call.details['tool_calls']:
+                        if tc.get('id') == tool_output.tool_call_id:
+                            # Found matching tool call, get claims from action.tool_call.arguments
+                            if action.tool_call.arguments and 'claims' in action.tool_call.arguments:
+                                claims = action.tool_call.arguments['claims'] or []
+                            break
+        
+        # Fallback to tool_output.arguments if no claims found from agent_actions
+        if not claims and tool_output.arguments and 'claims' in tool_output.arguments:
             claims = tool_output.arguments['claims'] or []
+        
         return {
             'claims': "; ".join(claims) if claims else "No claims",
             'output': tool_output.output or "No output"
@@ -361,7 +381,7 @@ class EvaluatorAgent(Agent):
                 # Build search results list for this turn
                 search_results = []
                 for i, tool_output in enumerate(tool_outputs):
-                    sr_info = self._extract_search_result_info(tool_output)
+                    sr_info = self._extract_search_result_info(tool_output, turn.agent_action)
                     sr_info['confirmation_question'] = None
                     sr_info['confirmation_response'] = None
                     if i < len(confirmation_responses):

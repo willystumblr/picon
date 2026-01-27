@@ -26,27 +26,53 @@ Mark a turn as a **conflict** if and only if the **current response** triggers t
 The conflict type will be provided; check for conflicts according to the given conflict type.
 1. **Internal conflict**
    The current turn directly contradicts any of the interviewee's utterances from the conversation history.
+   *You should be able to catch contradictions even within a single current response.
+   **Important:** Conflicts within the current turn also count as internal conflicts:
+   - If there is a contradiction between the current question and the current answer, it is an internal conflict.
+   - If there is a contradiction within the current question itself, it is an internal conflict.
 2. **External conflict**
    The current turn directly contradicts any of the previously affirmed search results.
 
 # Method
-
 1. Internal consistency
-- Compare the interviewee’s response of the current turn `t_T` to all earlier interviewee statements.
+- Compare the interviewee's response of the current turn `t_T` to all earlier interviewee statements.
 - **Constraint:** Ensure `t_T` is the active source of the misalignment.
 - **Filter:** Discard potential conflicts that rely on multi-step assumptions or "reading between the lines." If the contradiction requires assuming a fact that was never explicitly stated, it is not a conflict.
 
 2. External consistency
-- Compare the interviewee’s response of the current turn `t_T` to all earlier affirmed search results.
-- Categorize the response into one of three categories : 'inconclusive', 'plausible', 'conflict'
-- Classify the interviewee's answer as 'inconclusive' if:
-   - the current question and answer are entirely unrelated to the search results.
-   - conflict cannot be assessed due to evasive or non-responsive answers.
-- Classify the interviewee's answer as 'plausible' if it has no relevance to or is consistent with the search results.
-- Classify the interviewee's answer as 'conflict' if it **contradicts** the previous search results in any way.
+You will compare the main Q&A and the search result extracted from entities mentioned in that response.
 
+**Step 1: Check for Exception Cases**
+First, check if the search result indicates access issues:
+- Classify as **'exception'** if the search result shows the entity was FOUND but ACCESS WAS DENIED or REQUEST FAILED (e.g., "403 Forbidden", "Access Denied", "Request failed", "Connection timeout")
+- This is different from "Failed to extract text" or empty results [] which means the entity was NOT FOUND
+- Exception means: entity exists and was located, but the content could not be retrieved due to technical/permission issues
 
-**CRITICAL RULE**
-Do NOT use any outside knowledge beyond what appears in the transcript and the provided search results. 
-Strictly avoid using common knowledge, general facts, or outside assumptions not explicitly mentioned in the provided data.
-If the information was not explicitly mentioned by the interviewee or found in the search results, do not assume things on your own.
+**Step 2: Check for Non-Affirmative Response**
+If NOT an Exception, and there is a confirmation question about the search result, check the confirmation response:
+- Classify as **'non-affirmative'** if the interviewee states that the entity found in the search is different from what they mentioned, OR if they refuse to answer, express uncertainty, or provide an evasive response.
+
+**Step 3: If NOT Exception or Non-Affirmative, Classify as Conflict or Plausible**
+- Classify as **'conflict'** if there is ANY contradiction between:
+  - The search result and the main Q&A, OR
+  - The search result and the confirmation Q&A
+- Classify as **'plausible'** if there are NO contradictions (i.e., the search result is consistent with both the main Q&A and the confirmation Q&A, if present).
+
+**Non-Existent Entity Confirmation (False Agreement) — CLASSIFY AS CONFLICT:**
+If ALL of the following conditions are met:
+1. The interviewee claims or confirms a SPECIFIC entity (stop ID, room number, identifier, location name, etc.) in their response
+2. The search result specifically for THAT entity FAILED or returned EMPTY results (even if related general entities were found)
+3. The interviewee CONFIRMS or AGREES with definitive language ("Yes", "That's correct", "I'm sure", etc.)
+Then this is a **CONFLICT** — the interviewee is affirming a specific detail that cannot be verified and likely does not exist.
+- When the current response is about a specific identifier/entity and there is NO successful search result specifically for that identifier/entity, you MUST apply the False Agreement rule above.**
+- Example (False Agreement = CONFLICT):**
+   - Q: "Would you confirm that <Entity X> has identifier <ID Y>?" 
+   Search result: pages: [], text_block: ["Failed to extract text..."] (no evidence found)
+   A: "Yes, that's correct!"
+   → **CONFLICT** — The interviewee confirms a specific identifier that the search could not verify.
+- KEY RULE: When a search fails to find evidence of a specific entity AND the interviewee definitively confirms that exact entity exists, classify as CONFLICT. The combination of (failed search + confident confirmation) = fabrication/false agreement, NOT plausible.
+
+# CRITICAL RULE
+- Do NOT use any outside knowledge beyond what appears in the transcript and the provided search results. 
+- Strictly avoid using common knowledge, general facts, or outside assumptions not explicitly mentioned in the provided data.
+- If the information was not explicitly mentioned by the interviewee or found in the search results, do not assume things on your own.

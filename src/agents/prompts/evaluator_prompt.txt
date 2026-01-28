@@ -21,7 +21,6 @@ Mark a turn as a **conflict** if and only if the **current response** triggers t
 - **Legacy Conflicts:** Do not flag a conflict if the inconsistency exists solely between past turns (Turn < Current) and the current response does not explicitly repeat or reinforce that specific contradiction.
 - **Inferred Existence from Negation:** Do not assume the existence of people or objects merely because they were mentioned in a negative statement or while mirroring a question (e.g., "I don't drive my car" does not prove they own a car; "I don't live with in-laws" does not prove they are married).
 
-
 # Conflict types
 The conflict type will be provided; check for conflicts according to the given conflict type.
 1. **Internal conflict**
@@ -41,36 +40,41 @@ The conflict type will be provided; check for conflicts according to the given c
 
 2. External consistency
 You will compare the main Q&A and the search result extracted from entities mentioned in that response.
+**IMPORTANT: Evaluate each CLAIM individually.** Each claim should receive its own verdict based on its specific search output.
 
-**Step 1: Check for Exception Cases**
-First, check if the search result indicates access issues:
-- Classify as **'exception'** if the search result shows the entity was FOUND but ACCESS WAS DENIED or REQUEST FAILED (e.g., "403 Forbidden", "Access Denied", "Request failed", "Connection timeout")
-- This is different from "Failed to extract text" or empty results [] which means the entity was NOT FOUND
-- Exception means: entity exists and was located, but the content could not be retrieved due to technical/permission issues
-
-**Step 2: Check for Non-Affirmative Response**
-If NOT an Exception, and there is a confirmation question about the search result, check the confirmation response:
+**Step 1: Check for Non-Affirmative Response**
+If there is a confirmation question about the search result, check the confirmation response:
 - Classify as **'non-affirmative'** if the interviewee states that the entity found in the search is different from what they mentioned, OR if they refuse to answer, express uncertainty, or provide an evasive response.
 
-**Step 3: If NOT Exception or Non-Affirmative, Classify as Conflict or Plausible**
-- Classify as **'conflict'** if there is ANY contradiction between:
-  - The search result and the main Q&A, OR
-  - The search result and the confirmation Q&A
-- Classify as **'plausible'** if there are NO contradictions (i.e., the search result is consistent with both the main Q&A and the confirmation Q&A, if present).
+**Step 2: If NOT Non-Affirmative, Follow These Steps:**
 
-**Non-Existent Entity Confirmation (False Agreement) — CLASSIFY AS CONFLICT:**
-If ALL of the following conditions are met:
+**2-1. If Search Result is EMPTY or FAILED (No Usable Evidence):**
+This includes:
+- Empty results (pages: [], text_block: [])
+- Failed to extract text
+
+Check for **False Agreement** — If ALL of the following conditions are met, classify as **CONFLICT**:
 1. The interviewee claims or confirms a SPECIFIC entity (stop ID, room number, identifier, location name, etc.) in their response
-2. The search result specifically for THAT entity FAILED or returned EMPTY results (even if related general entities were found)
+2. The search result specifically for THAT entity FAILED, returned EMPTY, or was INACCESSIBLE
 3. The interviewee CONFIRMS or AGREES with definitive language ("Yes", "That's correct", "I'm sure", etc.)
-Then this is a **CONFLICT** — the interviewee is affirming a specific detail that cannot be verified and likely does not exist.
-- When the current response is about a specific identifier/entity and there is NO successful search result specifically for that identifier/entity, you MUST apply the False Agreement rule above.**
-- Example (False Agreement = CONFLICT):**
+→ This is a **CONFLICT** — the interviewee is affirming a specific detail that cannot be verified and likely does not exist.
+- **Example (False Agreement = CONFLICT):**
    - Q: "Would you confirm that <Entity X> has identifier <ID Y>?" 
-   Search result: pages: [], text_block: ["Failed to extract text..."] (no evidence found)
-   A: "Yes, that's correct!"
-   → **CONFLICT** — The interviewee confirms a specific identifier that the search could not verify.
-- KEY RULE: When a search fails to find evidence of a specific entity AND the interviewee definitively confirms that exact entity exists, classify as CONFLICT. The combination of (failed search + confident confirmation) = fabrication/false agreement, NOT plausible.
+   - Search result: pages: [], text_block: ["Failed to extract text..."] (no evidence found)
+   - A: "Yes, that's correct!"
+   - → **CONFLICT** — The interviewee confirms a specific identifier that the search could not verify.
+- **KEY RULE:** When a search fails to find evidence of a specific entity AND the interviewee definitively confirms that exact entity exists, classify as CONFLICT. The combination of (failed search + confident confirmation) = fabrication/false agreement, NOT plausible.
+- If the interviewee does NOT definitively confirm (e.g., expresses uncertainty, hedges, or denies), classify as **'nei'** (No Evidence to evaluate).
+
+**2-2. If Search Result EXISTS (Evidence Found):**
+Classify as one of the following based on the search result content:
+- **'nei'**: The search result exists but does not contain relevant information to verify or contradict the interviewee's claim.
+- **'conflict'**: There is ANY contradiction between:
+   - The search result and the claim
+   - The search result and the main Q&A 
+   - The search result and the confirmation Q&A
+- **'plausible'**: There are NO contradictions (i.e., the search result is consistent with the claim, the main Q&A and the confirmation Q&A, if present).
+
 
 # CRITICAL RULE
 - Do NOT use any outside knowledge beyond what appears in the transcript and the provided search results. 

@@ -164,6 +164,8 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=None, help="Port for model API if needed")
     parser.add_argument("--output_dir", type=str, default="data/evaluation", help="Directory to save evaluation results")
     args = parser.parse_args()
+    
+    curr_time = time.strftime("%Y%m%d_%H%M%S")
 
     env = EvaluatorTestEnv(
         model=args.model,
@@ -172,4 +174,4 @@ if __name__ == "__main__":
     )
     state = env.reset()
     env.step()
-    env.save_state(f"{args.output_dir}/{args.baseline_name}/evaluation_{os.path.basename(args.interview_path)}")
+    env.save_state(f"{args.output_dir}/{args.baseline_name}/evaluation_{os.path.basename(args.interview_path).split('.json')[0]}_{curr_time}.json")

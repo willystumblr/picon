@@ -59,7 +59,7 @@ class EvaluatorAgent(Agent):
                     "affirmativeness_score": 0.0,
                     "consistency_score": 0.0,
                 },
-                'total_search_results': 0,
+                'total_claims': 0,
                 'plausible': {
                     "count": 0,
                     "details": []
@@ -72,7 +72,7 @@ class EvaluatorAgent(Agent):
                     "count": 0,
                     "details": []
                 },
-                'exception': {
+                'nei': {
                     "count": 0,
                     "details": []
                 }
@@ -147,42 +147,48 @@ class EvaluatorAgent(Agent):
     def __generate_external_turn_verdict(self, turn_data: Dict[str, Any], log_prompt: bool = False):
         """
         Generate external consistency verdict for a single turn with web search results.
-        Evaluates each search result individually and returns verdicts for all search results in the turn.
+        Evaluates each CLAIM individually and returns verdicts for all claims in the turn.
         
-        Returns a list of verdicts, one for each search result in the turn.
-        Each verdict is one of: 'conflict', 'plausible', 'non-affirmative'
+        Returns a list of verdicts, one for each claim.
+        Each verdict is one of: 'conflict', 'plausible', 'non-affirmative', 'nei'
         """
-        # Build dynamic response format based on number of search results
-        search_results = turn_data['search_results']
-        num_results = len(search_results)
-        
         # Build the turn context string
         main_qa = f"Main Question: {turn_data['main_question']}\nMain Response: {turn_data['main_response']}\n\n"
         
-        search_context = "Search Results:\n\n"
-        for i, sr in enumerate(search_results):
-            search_context += f"=== Search Result Set {i+1} ===\n"
-            search_context += f"Claim: {sr['claims']}\n"
-            search_context += f"Search Output: {sr['output']}\n"
-            if sr.get('confirmation_question') and sr.get('confirmation_response'):
-                search_context += f"Confirmation Q: {sr['confirmation_question']}\n"
-                search_context += f"Confirmation A: {sr['confirmation_response']}\n"
-            search_context += "================================\n\n"
+        # Build claims context - enumerate each claim individually
+        claims_context = "Claims and Search Results:\n\n"
+        claim_index = 1
+        for sr in turn_data['search_results']:
+            # Split claims by semicolon if multiple claims exist
+            claims_list = [c.strip() for c in sr['claims'].split(';') if c.strip() and c.strip() != 'No claims']
+            if not claims_list:
+                claims_list = [sr['claims']]  # Use as-is if no semicolon separation
+            
+            for claim in claims_list:
+                claims_context += f"=== Claim {claim_index} ===\n"
+                claims_context += f"Claim: {claim}\n"
+                claims_context += f"Search Output: {sr['output']}\n"
+                if sr.get('confirmation_question') and sr.get('confirmation_response'):
+                    claims_context += f"Confirmation Q: {sr['confirmation_question']}\n"
+                    claims_context += f"Confirmation A: {sr['confirmation_response']}\n"
+                claims_context += "================================\n\n"
+                claim_index += 1
         
-        user_content = main_qa + search_context 
+        user_content = main_qa + claims_context 
 
         if log_prompt:
             logging.info(f"[External Turn Verdict] System Prompt:\n{self.external_eval_prompt}")
             logging.info(f"[External Turn Verdict] User Prompt:\n{user_content}")
         
         # Create dynamic Pydantic model for the response
-        class SearchResultVerdict(BaseModel):
-            search_result_index: int = Field(..., description="Index of the search result (1-based)")
-            verdict: Literal['conflict', 'plausible', 'non-affirmative', 'exception'] = Field(..., description="The verdict for this search result")
+        class ClaimVerdict(BaseModel):
+            claim_index: int = Field(..., description="Index of the claim (1-based)")
+            claim: str = Field(..., description="The claim being evaluated")
+            verdict: Literal['conflict', 'plausible', 'non-affirmative', 'nei'] = Field(..., description="The verdict for this claim")
             rationale: str = Field(..., description="The rationale behind the verdict")
         
         class ExternalTurnVerdictResponse(BaseModel):
-            verdicts: List[SearchResultVerdict] = Field(..., description="List of verdicts for each search result")
+            verdicts: List[ClaimVerdict] = Field(..., description="List of verdicts for each claim")
         
         completion_kwargs = dict(
             model=self.model,
@@ -474,6 +480,7 @@ class EvaluatorAgent(Agent):
         non_affirmative_count = 0
         conflict_count = 0
         plausible_count = 0
+        nei_count = 0
         
         if external_eval_turns:
             def generate_external_wrapper(args):
@@ -491,17 +498,12 @@ class EvaluatorAgent(Agent):
                 
                 for verdict_item in external_verdict.verdicts:
                     total_search_results += 1
-                    sr_idx = verdict_item.search_result_index - 1  # Convert to 0-based
-                    sr_info = turn_data['search_results'][sr_idx] if sr_idx < len(turn_data['search_results']) else {}
                     
                     detail = {
                         'turn_index': turn_idx,
                         'main_question': turn_data['main_question'],
                         'main_response': turn_data['main_response'],
-                        'claims': sr_info.get('claims', ''),
-                        'search_output': sr_info.get('output', ''),
-                        'confirmation_question': sr_info.get('confirmation_question'),
-                        'confirmation_response': sr_info.get('confirmation_response'),
+                        'claim': verdict_item.claim,
                         'rationale': verdict_item.rationale
                     }
                     
@@ -517,15 +519,17 @@ class EvaluatorAgent(Agent):
                         non_affirmative_count += 1
                         self.results_dict['external']['non-affirmative']['count'] += 1
                         self.results_dict['external']['non-affirmative']['details'].append(detail)
-                    elif verdict_item.verdict == 'exception':
-                        # Exception cases are not counted in consistency or affirmative ratios
-                        self.results_dict['external']['exception']['count'] += 1
-                        self.results_dict['external']['exception']['details'].append(detail)
+                    elif verdict_item.verdict == 'nei':
+                        # NEI (No Evidence to evaluate) - not counted in consistency ratio
+                        nei_count += 1
+                        self.results_dict['external']['nei']['count'] += 1
+                        self.results_dict['external']['nei']['details'].append(detail)
         
         # Calculate external scores
-        # consistency_score = conflict / (conflict + plausible), but we want plausible ratio for consistency
-        # So: consistency_score = plausible / (conflict + plausible)
-        external_consistency_ratio = plausible_count / (conflict_count + plausible_count) if (conflict_count + plausible_count) > 0 else 0.0
+        # consistency_score = plausible / (total_claims - nei_claims)
+        # NEI claims are excluded from consistency calculation
+        evaluated_claims = conflict_count + plausible_count
+        external_consistency_ratio = plausible_count / evaluated_claims if evaluated_claims > 0 else 0.0
         
         # affirmative_ratio = (total - non_affirmative) / total
         affirmative_ratio = (total_search_results - non_affirmative_count) / total_search_results if total_search_results > 0 else 0.0
@@ -536,8 +540,8 @@ class EvaluatorAgent(Agent):
         
         self._calculate_final_scores(responsive_ratio, affirmative_ratio, internal_plausible_ratio, external_consistency_ratio)
         
-        # Save search results summary
-        self.results_dict['external']['total_search_results'] = total_search_results
+        # Save claims summary
+        self.results_dict['external']['total_claims'] = total_search_results
     
     def _calculate_final_scores(self, responsive_ratio: float, affirmative_ratio: float, internal_plausible_ratio: float, external_plausible_ratio: float):
         """Calculate and store final scores"""

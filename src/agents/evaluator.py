@@ -273,10 +273,6 @@ class EvaluatorAgent(Agent):
 
 Search Result (Evidence): {search_result}
 
-Context:
-- Main Question: {main_question}
-- Main Response: {main_response}
-
 Based on the search result evidence, determine whether the claim is:
 1. **supported**: The search result provides evidence that supports/confirms the claim.
 2. **refuted**: The search result provides evidence that contradicts/refutes the claim.

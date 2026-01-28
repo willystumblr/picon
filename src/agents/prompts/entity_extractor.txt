@@ -75,6 +75,7 @@ Do **NOT** extract:
 * Vague or emotional expressions
 * Purely descriptive, numerical, or temporal information
   **(UNLESS it is a specific alphanumeric Identifier, Code, or Serial Number)**
+* Do not extract or list time information in isolation (e.g., '2024 exists' or 'April exists')
 
 ---
 

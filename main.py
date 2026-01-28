@@ -112,7 +112,8 @@ def main(args, interviewee_kwarg):
                 state, done = env.step()
             state = env.finalize()
         session_result = env.save_state()
-        histories.append(state.history)
+        # Use env.state.history instead of local state variable for reset_only sessions
+        histories.append(env.state.history)
         results_complete[f"session_{session_idx+1}"] = session_result
         logging.info(f"Completed session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
         reset_only = True
@@ -120,10 +121,10 @@ def main(args, interviewee_kwarg):
     results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
     write_json(results_complete, result_path)
     # Inter-session evaluation
-    eval_result = env.evaluate(histories)
-    results_complete["evaluation"] = eval_result
-    write_json(results_complete, result_path)
-    logging.info(f"Saved results to {result_path}.")
+    # eval_result = env.evaluate(histories)
+    # results_complete["evaluation"] = eval_result
+    # write_json(results_complete, result_path)
+    # logging.info(f"Saved results to {result_path}.")
 
 if __name__ == "__main__":
     args = parse_args()

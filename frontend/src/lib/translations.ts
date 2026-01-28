@@ -111,14 +111,15 @@ export const translations: Record<Language, Translations> = {
           checkboxLabel: 'I commit to answering truthfully or clearly stating my refusal',
         },
         {
-          title: 'Research and Resources',
-          description: 'You are allowed to use external resources to help you answer questions.',
+          title: 'Interview Nature & Resources',
+          description: 'This interview is designed as a stress test where the interviewer may question or verify your responses. Think of it as proving your identity - you are demonstrating that you are who you say you are.',
           details: [
-            'You may use Google or other search engines to look up information',
-            'It is always better to provide a response rather than to evade or dodge the question',
+            'The interviewer may ask probing questions to verify your responses',
+            'It is always better to attempt an answer rather than saying "I don\'t know" or evading the question',
+            'You may use Google or other search engines to look up information to help you answer',
             'Taking time to research your answer is completely acceptable',
           ],
-          checkboxLabel: 'I understand I can use external resources to help answer questions',
+          checkboxLabel: 'I understand the interview nature and that attempting to answer is better than evasion',
         },
         {
           title: 'Technical Requirements',
@@ -219,14 +220,15 @@ export const translations: Record<Language, Translations> = {
           checkboxLabel: '진실하게 답변하거나 명확하게 거부 의사를 표현하겠습니다',
         },
         {
-          title: '연구 및 리소스',
-          description: '질문에 답변하는 데 도움이 되는 외부 리소스를 사용할 수 있습니다.',
+          title: '인터뷰 성격 및 리소스',
+          description: '이 인터뷰는 면접관이 귀하의 답변을 질문하거나 확인할 수 있는 스트레스 테스트로 설계되었습니다. 귀하의 신원을 증명하는 것처럼 생각하세요 - 귀하가 말하는 사람이 맞다는 것을 보여주는 것입니다.',
           details: [
-            'Google 또는 다른 검색 엔진을 사용하여 정보를 찾을 수 있습니다',
-            '질문을 회피하거나 피하는 것보다 답변을 제공하는 것이 항상 더 좋습니다',
+            '면접관은 귀하의 답변을 확인하기 위해 심층적인 질문을 할 수 있습니다',
+            '"모르겠습니다"라고 말하거나 질문을 회피하는 것보다 답변을 시도하는 것이 항상 더 좋습니다',
+            'Google 또는 다른 검색 엔진을 사용하여 답변에 도움이 되는 정보를 찾을 수 있습니다',
             '답변을 조사하는 데 시간을 할애하는 것은 전적으로 허용됩니다',
           ],
-          checkboxLabel: '질문에 답변하는 데 외부 리소스를 사용할 수 있음을 이해했습니다',
+          checkboxLabel: '인터뷰 성격을 이해하며 회피보다 답변 시도가 더 낫다는 것을 이해했습니다',
         },
         {
           title: '기술적 요구사항',

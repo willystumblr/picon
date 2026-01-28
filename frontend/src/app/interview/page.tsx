@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 interface Message {
   id: string;
-  type: 'system' | 'user' | 'instruction';
+  type: 'system' | 'user';
   content: string;
   timestamp: Date;
 }
@@ -40,6 +40,7 @@ export default function InterviewPage() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -54,14 +55,8 @@ export default function InterviewPage() {
     setSessionData(data);
     setProgress(data.progress);
 
-    // Initialize messages with instruction and first question
+    // Initialize messages with first question
     setMessages([
-      {
-        id: 'instruction',
-        type: 'instruction',
-        content: data.instruction,
-        timestamp: new Date(),
-      },
       {
         id: 'q-0',
         type: 'system',
@@ -75,6 +70,13 @@ export default function InterviewPage() {
     // Scroll to bottom when messages change
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    // Keep focus on input when not loading
+    if (!isLoading && !isComplete) {
+      inputRef.current?.focus();
+    }
+  }, [isLoading, isComplete, messages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -279,14 +281,9 @@ export default function InterviewPage() {
               className={`max-w-[80%] rounded-lg px-4 py-2 ${
                 msg.type === 'user'
                   ? 'bg-blue-600 text-white'
-                  : msg.type === 'instruction'
-                  ? 'bg-yellow-50 border border-yellow-200 text-gray-700'
                   : 'bg-white shadow text-gray-800'
               }`}
             >
-              {msg.type === 'instruction' && (
-                <p className="text-xs font-semibold text-yellow-700 mb-2">📋 Instructions</p>
-              )}
               <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
             </div>
           </div>
@@ -312,11 +309,13 @@ export default function InterviewPage() {
         <form onSubmit={handleSubmit} className="bg-white border-t px-4 py-3">
           <div className="flex space-x-2">
             <input
+              ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type your response..."
               disabled={isLoading}
+              autoFocus
               className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition disabled:bg-gray-100"
             />
             <button
@@ -328,7 +327,7 @@ export default function InterviewPage() {
             </button>
           </div>
           <p className="text-xs text-gray-400 mt-2 text-center">
-            Press Enter to send • You may decline to answer any question
+            Press Enter to send your response.
           </p>
         </form>
       )}

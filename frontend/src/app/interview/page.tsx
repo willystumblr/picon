@@ -31,6 +31,32 @@ interface SessionData {
   name: string;
 }
 
+// Helper function to detect URLs and render them as clickable links
+function renderMessageContent(content: string) {
+  // URL regex pattern
+  const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
+  const parts = content.split(urlPattern);
+
+  return parts.map((part, index) => {
+    if (urlPattern.test(part)) {
+      // Reset regex lastIndex since we're reusing it
+      urlPattern.lastIndex = 0;
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 underline hover:text-blue-300 break-all"
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
 export default function InterviewPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -284,7 +310,7 @@ export default function InterviewPage() {
                   : 'bg-white shadow text-gray-800'
               }`}
             >
-              <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+              <p className="whitespace-pre-wrap text-sm">{renderMessageContent(msg.content)}</p>
             </div>
           </div>
         ))}

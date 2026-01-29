@@ -4,6 +4,17 @@
 
 import { ConsentStepContent } from '@/types/consent';
 
+// Helper function to parse **bold** markers and render as <strong> elements
+function renderWithBold(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index} className="font-semibold text-gray-900">{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
 interface ConsentStepProps {
   stepNumber: number;
   content: ConsentStepContent;
@@ -26,7 +37,7 @@ export default function ConsentStep({
 
       {/* Description */}
       <p className="text-gray-700 mb-4 leading-relaxed">
-        {content.description}
+        {renderWithBold(content.description)}
       </p>
 
       {/* Details (if provided) */}
@@ -34,7 +45,7 @@ export default function ConsentStep({
         <ul className="mb-6 space-y-2">
           {content.details.map((detail, index) => (
             <li key={index} className="text-gray-600 text-sm leading-relaxed pl-4">
-              {detail}
+              {renderWithBold(detail)}
             </li>
           ))}
         </ul>

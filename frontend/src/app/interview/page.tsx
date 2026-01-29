@@ -33,7 +33,7 @@ interface SessionData {
 
 // Helper function to detect URLs and render them as clickable links
 function renderMessageContent(content: string) {
-  // URL regex pattern
+  // URL regex pattern - captures URL and any trailing punctuation separately
   const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
   const parts = content.split(urlPattern);
 
@@ -41,16 +41,25 @@ function renderMessageContent(content: string) {
     if (urlPattern.test(part)) {
       // Reset regex lastIndex since we're reusing it
       urlPattern.lastIndex = 0;
+
+      // Strip trailing punctuation that's likely not part of the URL
+      const trailingPunctuation = /[)?\]!.,;:]+$/;
+      const match = part.match(trailingPunctuation);
+      const url = match ? part.slice(0, -match[0].length) : part;
+      const trailing = match ? match[0] : '';
+
       return (
-        <a
-          key={index}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-400 underline hover:text-blue-300 break-all"
-        >
-          {part}
-        </a>
+        <span key={index}>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-400 underline hover:text-blue-300 break-all"
+          >
+            {url}
+          </a>
+          {trailing}
+        </span>
       );
     }
     return part;

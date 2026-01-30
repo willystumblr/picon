@@ -168,62 +168,27 @@ class EvaluatorAgent(Agent):
                 logging.warning(f"Pydantic validation failed for UncooperativeResponse, retrying... ({attempt + 1}/{max_retries})")
                 continue
     
-    def __generate_external_turn_verdict(self, turn_data: Dict[str, Any], log_prompt: bool = False):
-        """
-        Generate external consistency verdict for a single turn with web search results.
-        Evaluates each CLAIM individually and returns verdicts for all claims in the turn.
-        
-        Returns a list of verdicts, one for each claim.
-        Each verdict is one of: 'conflict', 'plausible', 'non-affirmative', 'nei'
-        """
-        # Build the turn context string
-        main_qa = f"Main Question: {turn_data['main_question']}\nMain Response: {turn_data['main_response']}\n\n"
-        
-        # Build claims context - enumerate each claim individually
-        claims_context = "Claims and Search Results:\n\n"
-        claim_index = 1
-        for sr in turn_data['search_results']:
-            # Split claims by semicolon if multiple claims exist
-            claims_list = [c.strip() for c in sr['claims'].split(';') if c.strip() and c.strip() != 'No claims']
-            if not claims_list:
-                claims_list = [sr['claims']]  # Use as-is if no semicolon separation
-            
-            for claim in claims_list:
-                claims_context += f"=== Claim {claim_index} ===\n"
-                claims_context += f"Claim: {claim}\n"
-                claims_context += f"Search Output: {sr['output']}\n"
-                if sr.get('confirmation_question') and sr.get('confirmation_response'):
-                    claims_context += f"Confirmation Q: {sr['confirmation_question']}\n"
-                    claims_context += f"Confirmation A: {sr['confirmation_response']}\n"
-                claims_context += "================================\n\n"
-                claim_index += 1
-        
-        user_content = main_qa + claims_context 
-
-        if log_prompt:
-            logging.info(f"[External Turn Verdict] System Prompt:\n{self.external_eval_prompt}")
-            logging.info(f"[External Turn Verdict] User Prompt:\n{user_content}")
-        
-        # Create dynamic Pydantic model for the response
-        class ClaimVerdict(BaseModel):
-            claim_index: int = Field(..., description="Index of the claim (1-based)")
-            claim: str = Field(..., description="The claim being evaluated")
-            verdict: Literal['conflict', 'plausible', 'non-affirmative', 'nei'] = Field(..., description="The verdict for this claim")
+    def __generate_affirmative_check(self, qa_pair: Dict[str, Any]):
+        """Check if the answer affirms the search result (Step 2 - only for confirmation questions)"""
+        class AffirmativeResponse(BaseModel):
+            is_affirmative: bool = Field(..., description="Whether the response affirms the search result")
             rationale: str = Field(..., description="The rationale behind the verdict")
         
-        class ExternalTurnVerdictResponse(BaseModel):
-            verdicts: List[ClaimVerdict] = Field(..., description="List of verdicts for each claim")
+        user_content = "Question: " + qa_pair['question'] + "\n\nAnswer: " + qa_pair['response']
+        
+        if qa_pair.get('log_prompt', False):
+            logging.info(f"[Affirmative Check] System Prompt:\n{self.affirmative_prompt}")
+            logging.info(f"[Affirmative Check] User Prompt:\n{user_content}")
         
         completion_kwargs = dict(
             model=self.model,
             messages=[
-                {"role": "system", "content": self.external_eval_prompt},
+                {"role": "system", "content": self.affirmative_prompt},
                 {"role": "user", "content": user_content}
             ],
             reasoning_effort="low",
-            response_format=ExternalTurnVerdictResponse
+            response_format=AffirmativeResponse
         )
-        
         if self.model.startswith("hosted_vllm/"):
             assert self.port is not None, "Port must be specified for hosted_vllm models."    
             completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
@@ -233,19 +198,13 @@ class EvaluatorAgent(Agent):
             try:
                 response = get_completion(**completion_kwargs)
                 self._calculate_cost(response)
-                raw_content = response.choices[0].message.content
-
-                if raw_content is None:
-                    logging.warning(f"API returned None. Finish reason: {response.choices[0].finish_reason}")
-                    raise ValueError("API returned None content")
-                
-                parsed_response = ExternalTurnVerdictResponse.model_validate_json(raw_content)
+                parsed_response = AffirmativeResponse.model_validate_json(response.choices[0].message.content)
                 return parsed_response
-            except (ValidationError, ValueError) as e:
+            except ValidationError as e:
                 if attempt == max_retries - 1:
                     logging.error(f"Pydantic validation failed after {max_retries} attempts: {e}")
                     raise
-                logging.warning(f"Pydantic validation failed for ExternalTurnVerdictResponse, retrying... ({attempt + 1}/{max_retries})")
+                logging.warning(f"Pydantic validation failed for AffirmativeResponse, retrying... ({attempt + 1}/{max_retries})")
                 continue
     
     def __generate_internal_consistency_verdict(self, qa_history: str, current_question: str, current_response: str, log_prompt: bool = False):
@@ -367,61 +326,6 @@ Determine which label best fits."""
             claims_str = "Claims: " + "; ".join(claims) + "\n"
         output_str = f"Output: {tool_output.output}"
         return claims_str + output_str
-    
-    def _extract_search_result_info(self, tool_output: 'ToolOutput', agent_actions: List[Action] = None) -> Dict[str, Any]:
-        """Extract search result info for external evaluation.
-        
-        Claims are stored in agent_action.tool_call.arguments, not in tool_output.arguments.
-        We need to match by tool_call_id to find the corresponding claims.
-        """
-        claims = []
-        
-        # First try to get claims from agent_actions using tool_call_id matching
-        if agent_actions and tool_output.tool_call_id:
-            for action in agent_actions:
-                if (action.tool_call and 
-                    action.tool_call.details and 
-                    action.tool_call.details.get('tool_calls')):
-                    for tc in action.tool_call.details['tool_calls']:
-                        if tc.get('id') == tool_output.tool_call_id:
-                            # Found matching tool call, get claims from action.tool_call.arguments
-                            if action.tool_call.arguments and 'claims' in action.tool_call.arguments:
-                                claims = action.tool_call.arguments['claims'] or []
-                            break
-        
-        # Fallback to tool_output.arguments if no claims found from agent_actions
-        if not claims and tool_output.arguments and 'claims' in tool_output.arguments:
-            claims = tool_output.arguments['claims'] or []
-        
-        return {
-            'claims': "; ".join(claims) if claims else "No claims",
-            'output': tool_output.output or "No output"
-        }
-
-    def _extract_claims(self, tool_output: 'ToolOutput', agent_actions: List = None, tool_idx: int = 0) -> List[str]:
-        """Extract claims list from tool output or agent_action.
-
-        Claims may be stored in:
-        1. tool_output.arguments['claims'] (preferred)
-        2. agent_action[i].tool_call.arguments['claims'] (fallback for some data formats)
-        """
-        # Try extracting from tool_output.arguments first
-        if tool_output.arguments and 'claims' in tool_output.arguments:
-            return tool_output.arguments['claims'] or []
-
-        # Fallback: extract from agent_action if tool_output.arguments is None
-        if agent_actions:
-            tool_call_actions = [a for a in agent_actions if a.action_type == "tool_call" and a.tool_call]
-            if tool_idx < len(tool_call_actions):
-                action = tool_call_actions[tool_idx]
-                if action.tool_call.arguments and 'claims' in action.tool_call.arguments:
-                    return action.tool_call.arguments['claims'] or []
-
-        return []
-
-    def _extract_search_result(self, tool_output: 'ToolOutput') -> str:
-        """Extract search result output from tool output."""
-        return tool_output.output if tool_output.output else ""
 
     def _extract_claims(self, tool_output: 'ToolOutput', agent_actions: List = None, tool_idx: int = 0) -> List[str]:
         """Extract claims list from tool output or agent_action.
@@ -595,7 +499,7 @@ Determine which label best fits."""
                 cooperative_count += 1
 
         responsive_ratio = cooperative_count / total_count if total_count > 0 else 0.0
-
+        # coverage = 
         # Step 3: Process affirmative results and prepare per-claim fact verification
         # For non-affirmed → 'not_confirmed', for affirmed → verify each claim individually
         affirmed_items = []  # Items where interviewee confirmed the search result
@@ -727,7 +631,7 @@ Determine which label best fits."""
         refuted_count = self.results_dict['external']['claims']['refuted']['count']
         verifiable_count = supported_count + refuted_count
         external_consistency_ratio = supported_count / verifiable_count if verifiable_count > 0 else 0.0
-
+        
         self._calculate_final_scores(responsive_ratio, affirmative_ratio, internal_plausible_ratio, external_consistency_ratio)
 
         # Save affirmed search results to final output

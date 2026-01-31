@@ -30,6 +30,7 @@ interface Translations {
   consent: {
     title: string;
     progressLabel: string;
+    warning: string;
     steps: ConsentStepContent[];
     startInterview: string;
   };
@@ -79,6 +80,7 @@ export const translations: Record<Language, Translations> = {
       title: 'Informed Consent',
       progressLabel: 'Step {current} of {total}',
       startInterview: 'Start Interview',
+      warning: 'Before participating in this survey, please read and understand the consent form and instructions carefully. As this is a **paid study**, we kindly ask for your **sincere and thoughtful responses to all questions**. We appreciate your valuable time, and to ensure accurate data collection, **please note that compensation may be limited if insincere or false responses are identified.**',
       steps: [
         {
           title: 'Interview Nature & Resources',
@@ -189,6 +191,7 @@ export const translations: Record<Language, Translations> = {
       title: '사전 동의서',
       progressLabel: '{total}단계 중 {current}단계',
       startInterview: '인터뷰 시작',
+      warning: '본 설문에 참여하시기 전, 동의서의 내용 및 주의사항을 충분히 숙지해 주시기 바랍니다. 본 조사는 유급으로 진행되는 만큼, **모든 문항에 대하여 참여자분의 진솔하고 성의 있는 답변을 부탁드립니다.** 귀한 시간 내어 주시는 만큼 정확한 자료 수집을 위해, **불성실하거나 허위의 응답이 확인될 경우 사례비 지급에 제한이 있을 수 있음을 양해 부탁드립니다.**',
       steps: [
         {
           title: '인터뷰 성격 및 리소스',

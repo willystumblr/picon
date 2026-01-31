@@ -81,6 +81,38 @@ export const translations: Record<Language, Translations> = {
       startInterview: 'Start Interview',
       steps: [
         {
+          title: 'Interview Nature & Resources',
+          description: 'This interview is designed as a **stress test** where the interviewer may question or verify your responses. Think of it as proving your identity - you are demonstrating that you are who you say you are.',
+          details: [
+            'The interviewer may ask probing questions to verify your responses',
+            'It is **always better to attempt an answer** rather than saying "I don\'t know" or evading the question',
+            'If the interviewer asks about factual elements (e.g., building names, place names, dates), please **use Google or other search engines** to look up information and attempt to answer as best as you can',
+            'If the interviewer directly provides the relevant URL links, **please visit the site, review the content, and use it to inform your answers**',
+            'Taking time to research your answer is completely acceptable',
+          ],
+          checkboxLabel: 'I understand the interview nature and that attempting to answer is better than evasion',
+        },
+        {
+          title: 'Commitment to Honesty',
+          description: 'Please be truthful in all questions. If you do not want to provide further information, clearly express your refusal rather than providing false information.',
+          details: [
+            'Honest responses help us conduct meaningful research',
+            'If you prefer not to answer, simply state your refusal clearly',
+            'There is no penalty for declining to answer',
+          ],
+          checkboxLabel: 'I commit to answering truthfully or clearly stating my refusal',
+        },
+        {
+          title: 'Technical Requirements',
+          description: 'Please do NOT reload or exit the page during the interview.',
+          details: [
+            'Reloading the page will cause you to lose your interview progress',
+            'You will need to start over from the beginning if you refresh',
+            'Please keep this browser tab open until the interview is complete',
+          ],
+          checkboxLabel: 'I understand I should not reload or close this page during the interview',
+        },
+        {
           title: 'Interview Structure',
           description: 'This interview will take up to a maximum of 1 hour and consists of three phases:',
           details: [
@@ -99,38 +131,6 @@ export const translations: Record<Language, Translations> = {
             'You can even change the topic by saying, for example, "can we talk about something else?"',
           ],
           checkboxLabel: 'I understand I can decline to answer any question that makes me uncomfortable',
-        },
-        {
-          title: 'Commitment to Honesty',
-          description: 'Please be truthful in all questions. If you do not want to provide further information, clearly express your refusal rather than providing false information.',
-          details: [
-            'Honest responses help us conduct meaningful research',
-            'If you prefer not to answer, simply state your refusal clearly',
-            'There is no penalty for declining to answer',
-          ],
-          checkboxLabel: 'I commit to answering truthfully or clearly stating my refusal',
-        },
-        {
-          title: 'Interview Nature & Resources',
-          description: 'This interview is designed as a **stress test** where the interviewer may question or verify your responses. Think of it as proving your identity - you are demonstrating that you are who you say you are.',
-          details: [
-            'The interviewer may ask probing questions to verify your responses',
-            'It is **always better to attempt an answer** rather than saying "I don\'t know" or evading the question',
-            'If the interviewer asks about factual elements (e.g., building names, place names, dates), please **use Google or other search engines** to look up information and attempt to answer as best as you can',
-            'If the interviewer directly provides the relevant URL links, **please visit the site, review the content, and use it to inform your answers**',
-            'Taking time to research your answer is completely acceptable',
-          ],
-          checkboxLabel: 'I understand the interview nature and that attempting to answer is better than evasion',
-        },
-        {
-          title: 'Technical Requirements',
-          description: 'Please do NOT reload or exit the page during the interview.',
-          details: [
-            'Reloading the page will cause you to lose your interview progress',
-            'You will need to start over from the beginning if you refresh',
-            'Please keep this browser tab open until the interview is complete',
-          ],
-          checkboxLabel: 'I understand I should not reload or close this page during the interview',
         },
         {
           title: 'Data Usage and Protection',
@@ -191,6 +191,38 @@ export const translations: Record<Language, Translations> = {
       startInterview: '인터뷰 시작',
       steps: [
         {
+          title: '인터뷰 성격 및 리소스',
+          description: '이 인터뷰는 심문관이 귀하에 대해 매우 집요하게 질문하는 **스트레스 테스트**로 설계되었습니다. 귀하의 신원을 증명하는 것처럼 생각하세요 - 귀하 본인이 맞다는 것을 입증하는 심문이라고 생각하시면 됩니다.',
+          details: [
+            '심문관은 귀하의 답변을 확인하기 위해 심층적인 질문을 할 수 있습니다.',
+            '"모르겠습니다"라고 말하거나 질문을 회피하는 것보다 **답변을 시도하는 것이 항상 더 좋습니다**.',
+            '사실적인 요소(건물명, 지명, 날짜 등)에 관한 질문의 경우, **Google 등의 검색 엔진을 사용하여** 최대한 답변을 시도해주세요.',
+            '심문관이 직접 관련 URL 링크를 제공하는 경우, 사이트에 접속하여 내용을 확인한 후 답변에 활용해주세요.',
+            '답변을 위해 관련된 정보를 탐색하는 데 충분히 시간을 가지셔도 됩니다.',
+          ],
+          checkboxLabel: '인터뷰 성격을 이해하며 회피보다 답변 시도가 더 낫다는 것을 이해했습니다',
+        },
+        {
+          title: '정직성 약속',
+          description: '모든 질문에 대해 진실하게 답변해 주세요. 추가 정보를 제공하고 싶지 않으시면 거짓 정보를 제공하는 대신 명확하게 거부 의사를 표현해 주세요.',
+          details: [
+            '정직한 답변은 의미 있는 연구를 수행하는 데 도움이 됩니다',
+            '답변하고 싶지 않으시면 명확하게 거부 의사를 표현해 주세요',
+            '답변 거부에 대한 불이익은 없습니다',
+          ],
+          checkboxLabel: '진실하게 답변하거나 명확하게 거부 의사를 표현하겠습니다',
+        },
+        {
+          title: '기술적 요구사항',
+          description: '인터뷰 중에 페이지를 새로고침하거나 종료하지 마세요.',
+          details: [
+            '페이지를 새로고침하면 인터뷰 진행 상황이 손실됩니다',
+            '새로고침하면 처음부터 다시 시작해야 합니다',
+            '인터뷰가 완료될 때까지 이 브라우저 탭을 열어 두세요',
+          ],
+          checkboxLabel: '인터뷰 중에 페이지를 새로고침하거나 닫지 않아야 함을 이해했습니다',
+        },
+        {
           title: '인터뷰 구조',
           description: '이 인터뷰는 최대 1시간이 소요되며 3단계로 진행됩니다:',
           details: [
@@ -209,38 +241,6 @@ export const translations: Record<Language, Translations> = {
             '예를 들어 "다른 주제에 대해 이야기할 수 있을까요?"라고 말하여 주제를 변경할 수도 있습니다',
           ],
           checkboxLabel: '불편한 질문에 대해서는 답변을 거부할 수 있음을 이해했습니다',
-        },
-        {
-          title: '정직성 약속',
-          description: '모든 질문에 대해 진실하게 답변해 주세요. 추가 정보를 제공하고 싶지 않으시면 거짓 정보를 제공하는 대신 명확하게 거부 의사를 표현해 주세요.',
-          details: [
-            '정직한 답변은 의미 있는 연구를 수행하는 데 도움이 됩니다',
-            '답변하고 싶지 않으시면 명확하게 거부 의사를 표현해 주세요',
-            '답변 거부에 대한 불이익은 없습니다',
-          ],
-          checkboxLabel: '진실하게 답변하거나 명확하게 거부 의사를 표현하겠습니다',
-        },
-        {
-          title: '인터뷰 성격 및 리소스',
-          description: '이 인터뷰는 심문관이 귀하에 대해 매우 집요하게 질문하는 **스트레스 테스트**로 설계되었습니다. 귀하의 신원을 증명하는 것처럼 생각하세요 - 귀하 본인이 맞다는 것을 입증하는 심문이라고 생각하시면 됩니다.',
-          details: [
-            '심문관은 귀하의 답변을 확인하기 위해 심층적인 질문을 할 수 있습니다.',
-            '"모르겠습니다"라고 말하거나 질문을 회피하는 것보다 **답변을 시도하는 것이 항상 더 좋습니다**.',
-            '사실적인 요소(건물명, 지명, 날짜 등)에 관한 질문의 경우, **Google 등의 검색 엔진을 사용하여** 최대한 답변을 시도해주세요.',
-            '심문관이 직접 관련 URL 링크를 제공하는 경우, 사이트에 접속하여 내용을 확인한 후 답변에 활용해주세요.',
-            '답변을 위해 관련된 정보를 탐색하는 데 충분히 시간을 가지셔도 됩니다.',
-          ],
-          checkboxLabel: '인터뷰 성격을 이해하며 회피보다 답변 시도가 더 낫다는 것을 이해했습니다',
-        },
-        {
-          title: '기술적 요구사항',
-          description: '인터뷰 중에 페이지를 새로고침하거나 종료하지 마세요.',
-          details: [
-            '페이지를 새로고침하면 인터뷰 진행 상황이 손실됩니다',
-            '새로고침하면 처음부터 다시 시작해야 합니다',
-            '인터뷰가 완료될 때까지 이 브라우저 탭을 열어 두세요',
-          ],
-          checkboxLabel: '인터뷰 중에 페이지를 새로고침하거나 닫지 않아야 함을 이해했습니다',
         },
         {
           title: '데이터 사용 및 보호',

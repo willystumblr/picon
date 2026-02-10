@@ -87,6 +87,8 @@ class WebSearchAgent(Agent):
             tool_name = tool_call['function']['name']
             arguments = json.loads(tool_call['function']['arguments'])
             if claims and tool_name == 'google_claim_search':
+                if entity and 'exactTerms' in arguments:
+                    arguments['exactTerms'] = entity # fix exactTerms to be the entity
                 arguments['claims'] = claims
             return Action(
                 agent=self.role,

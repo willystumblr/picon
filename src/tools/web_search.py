@@ -350,6 +350,7 @@ class GoogleClaimSearch(BaseModel):
                 "cx": self.cx,
                 "num": TOP_K_RESULTS,
                 "gl": gl,
+                "exactTerms": exactTerms if exactTerms else "",
             }
             resp = requests.get(search_url, params=q_params, timeout=6)
             resp.raise_for_status()

@@ -30,7 +30,7 @@ class GoogleGeocodeValidate(BaseModel):
     # Tool entry point
     # ---------------------------------------------------------------------
 
-    def invoke(self, address: str) -> str:  # noqa: D401  (command verbs fine)
+    def invoke(self, address: str, **kwargs) -> str:  # noqa: D401  (command verbs fine)
         """Return 'valid' when a rooftop-level exact match exists; else 'invalid'."""
         try:
             data = self._geocode(address)

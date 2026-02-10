@@ -4,21 +4,18 @@ from src.agents.agent_factory import get_agent
 from src.tools.web_search import GoogleClaimSearch
 from src.tools.address_locator import GoogleGeocodeValidate
 from dotenv import load_dotenv
-from datasets import load_dataset
-from litellm.cost_calculator import completion_cost
 import argparse
 import re
 import os
 import time
 import logging
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
     # Model selection
-    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview', 'naive_human_simulacra', 'persona_hub'])
+    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview', 'naive_human_simulacra', 'persona_hub', 'twin_2k_500', 'deeppersona'])
     parser.add_argument('--questioner_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the questioner.')
     parser.add_argument('--extractor_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the extractor.')
     parser.add_argument('--web_search_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the web search agent.')
@@ -55,7 +52,7 @@ def parse_args():
     parser.add_argument('--evaluator_prompt_path', type=str, default='src/agents/prompts/evaluator_prompt.txt', help='Path to the evaluator agent prompt file.')
     parser.add_argument('--output_dir', type=str, default='data/results', help='Directory to save the results.')
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
-    
+    parser.add_argument('--question_file_path', type=str, default='src/env/wvs_orthogonal_questions.json', help='Path to the pre-defined questions file.')
     
     return parser.parse_args()
 
@@ -97,6 +94,7 @@ def main(args, interviewee_kwarg):
         },
         tools=tools,
         max_turns=args.num_turns,
+        question_path=args.question_file_path,
         **interviewee_kwarg
     )
     
@@ -156,6 +154,7 @@ if __name__ == "__main__":
             "nhd_port": args.nhd_port,
         } for name in ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami Clark", "Michael Miller", "Kevin Kelly", "Erica Walker", "Leslie Nichols", "Robert Scott", "Marsh Zhaleh"]]
     elif args.baseline_name == "opencharacter":
+        from datasets import load_dataset
         dataset = load_dataset("xywang1/OpenCharacter", "Synthetic-Character", split="train")
         if args.do_sample:
             dataset = dataset.shuffle(seed=args.seed).select(range(12))
@@ -230,8 +229,44 @@ if __name__ == "__main__":
             "nhd_port": args.nhd_port,
             "question_seed": args.question_seed
         }]
+    elif args.baseline_name == "twin_2k_500":
+        from datasets import load_dataset
+        dataset = load_dataset("LLM-Digital-Twin/Twin-2K-500", "full_persona", split="data")
+        if args.do_sample:
+            dataset = dataset.shuffle(seed=args.seed).select(range(10))
+        for data in dataset:
+            name = f"Twin-{data['pid']}"
+            interviewee_kwargs.append({
+                "baseline_name": "twin_2k_500",
+                "simulator_model": args.simulator_model,
+                "persona": data['persona_json'],
+                "name": name,
+                "nhd_model": args.nhd_model,
+                "question_seed": args.question_seed,
+                "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
+            })
+    
+    elif args.baseline_name == "deeppersona":
+        import glob
+        dataset_path = "/home/data_storage/deeppersona"
+        persona_files = glob.glob(os.path.join(dataset_path, "*.json"))
+        for persona_file in persona_files:
+            data = read_json(persona_file)
+            name = os.path.basename(persona_file).replace(".json", "")
+            interviewee_kwargs.append({
+                "baseline_name": "deeppersona",
+                "simulator_model": args.simulator_model,
+                "persona": data,
+                "name": name,
+                "nhd_model": args.nhd_model,
+                "question_seed": args.question_seed,
+                "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
+            })
+    
     else:
-        raise ValueError("Invalid baseline name. Choose from ['characterai', 'human_simulacra', 'opencharacter', 'human_interview']")
+        raise ValueError("Invalid baseline name. Choose from ['characterai', 'human_simulacra', 'opencharacter', 'human_interview', 'twin_2k_500', 'consistent_llm', 'persona_hub']")
     
     proceed_list = []
     for interviewee_kwarg in interviewee_kwargs:

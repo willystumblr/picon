@@ -20,6 +20,7 @@ class EvaluatorTestEnv:
         **kwargs
         ):
         self.model = model
+        self.host = kwargs.get('host', None)
         self.port = kwargs.get('port', None)
         self.start_time = time.time()
         self.env_cost = 0.0
@@ -59,7 +60,8 @@ class EvaluatorTestEnv:
             "evaluator",
             f"{project_root}/src/agents/prompts/evaluator_prompt.txt",
             model=model,
-            port=self.port
+            port=self.port,
+            host=self.host
         )
         # Replace the evaluator's memory with the saved memory
         self.evaluator.memory = self.evaluator_memory.copy()
@@ -161,6 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="gpt-5", help="Model to use")
     parser.add_argument("--interview_path", type=str, required=True, help="Path to interview data JSON file")
     parser.add_argument("--baseline_name", type=str, required=True, help="Baseline name for saving results")
+    parser.add_argument("--host", type=str, default=None, help="Evaluator api base url")
     parser.add_argument("--port", type=int, default=None, help="Port for model API if needed")
     parser.add_argument("--output_dir", type=str, default="data/evaluation", help="Directory to save evaluation results")
     args = parser.parse_args()
@@ -170,7 +173,8 @@ if __name__ == "__main__":
     env = EvaluatorTestEnv(
         model=args.model,
         interview_path=args.interview_path,
-        port=args.port
+        port=args.port,
+        host=args.host
     )
     state = env.reset()
     env.step()

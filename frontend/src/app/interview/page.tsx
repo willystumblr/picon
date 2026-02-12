@@ -134,7 +134,7 @@ export default function InterviewPage() {
     ]);
 
     try {
-      const response = await fetch('/api/respond', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -170,7 +170,7 @@ export default function InterviewPage() {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 60000); // 1 minute timeout
           
-          const resultsResponse = await fetch(`/api/results/${sessionData.sessionId}`, {
+          const resultsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/results/${sessionData.sessionId}`, {
             signal: controller.signal,
           });
           clearTimeout(timeoutId);

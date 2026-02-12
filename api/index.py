@@ -119,13 +119,13 @@ def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
 
 
 @app.get("/api/health")
-async def health_check():
+def health_check():
     """Health check endpoint."""
     return {"status": "ok", "timestamp": time.time()}
 
 
 @app.post("/api/start", response_model=StartInterviewResponse)
-async def start_interview(request: StartInterviewRequest):
+def start_interview(request: StartInterviewRequest):
     """Start a new interview session."""
     try:
         session_id = str(uuid.uuid4())
@@ -149,7 +149,7 @@ async def start_interview(request: StartInterviewRequest):
 
 
 @app.post("/api/respond", response_model=RespondResponse)
-async def submit_response(request: RespondRequest):
+def submit_response(request: RespondRequest):
     """Submit a response and get the next question."""
     if request.session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -173,7 +173,7 @@ async def submit_response(request: RespondRequest):
 
 
 @app.get("/api/results/{session_id}", response_model=ResultsResponse)
-async def get_results(session_id: str):
+def get_results(session_id: str):
     """Get the final results for a completed interview (without evaluation phase)."""
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found. It may have already been processed.")
@@ -218,7 +218,7 @@ async def get_results(session_id: str):
 
 
 @app.delete("/api/session/{session_id}")
-async def cancel_session(session_id: str):
+def cancel_session(session_id: str):
     """Cancel and cleanup a session."""
     if session_id in sessions:
         env = sessions[session_id]

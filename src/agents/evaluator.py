@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Literal
 import re
 import time
+import math
 from pydantic import BaseModel, Field, ValidationError
 import logging
 import litellm
@@ -78,9 +79,9 @@ class EvaluatorAgent(Agent):
             },
             'external': {
                 'score': {
-                    "harmonic_mean": 0.0,
-                    "affirmativeness_score": 0.0,
-                    "consistency_score": 0.0,
+                    "wilson_score": 0.0,
+                    "supported_count": 0,
+                    "total_claim_count": 0,
                 },
                 'not_confirmed': {
                     "count": 0,
@@ -625,19 +626,40 @@ Determine which label best fits."""
         internal_plausible_ratio = (self.results_dict['internal']['plausible']['count'] /
                                    (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count'])) if (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count']) > 0 else 0.0
 
-        # External: per-claim consistency score
-        # consistency = supported / (supported + refuted), excluding 'nei'
+        # External: Wilson Score Lower Bound over all claims (supported + refuted + nei)
         supported_count = self.results_dict['external']['claims']['supported']['count']
         refuted_count = self.results_dict['external']['claims']['refuted']['count']
-        verifiable_count = supported_count + refuted_count
-        external_consistency_ratio = supported_count / verifiable_count if verifiable_count > 0 else 0.0
+        nei_count = self.results_dict['external']['claims']['nei']['count']
+        total_claim_count = supported_count + refuted_count + nei_count
         
-        self._calculate_final_scores(responsive_ratio, affirmative_ratio, internal_plausible_ratio, external_consistency_ratio)
+        self._calculate_final_scores(responsive_ratio, internal_plausible_ratio, supported_count, total_claim_count)
 
         # Save affirmed search results to final output
         self.results_dict['confirmed_search_results'] = self.affirmed_search_results
     
-    def _calculate_final_scores(self, responsive_ratio: float, affirmative_ratio: float, internal_plausible_ratio: float, external_plausible_ratio: float):
+    @staticmethod
+    def wilson_score_lower_bound(success_count: int, total_count: int, confidence: float = 0.95) -> float:
+        """Calculate Wilson Score Interval Lower Bound.
+        
+        :param success_count: Number of successes (e.g., supported claims)
+        :param total_count: Total number of trials (e.g., all claims)
+        :param confidence: Confidence level (default 95% -> z ~ 1.96)
+        :return: Lower bound score between 0.0 and 1.0
+        """
+        if total_count == 0:
+            return 0.0
+
+        z = 1.96  # z-score for 95% confidence
+        p_hat = success_count / total_count
+
+        numerator = p_hat + (z**2) / (2 * total_count) - z * math.sqrt(
+            (p_hat * (1 - p_hat)) / total_count + (z**2) / (4 * total_count**2)
+        )
+        denominator = 1 + (z**2) / total_count
+
+        return numerator / denominator
+
+    def _calculate_final_scores(self, responsive_ratio: float, internal_plausible_ratio: float, supported_count: int, total_claim_count: int):
         """Calculate and store final scores"""
         # Internal score: harmonic mean of plausible ratio and responsive ratio
         if internal_plausible_ratio + responsive_ratio > 0:
@@ -648,14 +670,11 @@ Determine which label best fits."""
         self.results_dict['internal']['score']['responsiveness_score'] = responsive_ratio
         self.results_dict['internal']['score']['consistency_score'] = internal_plausible_ratio
         
-        # External score: harmonic mean of plausible ratio and affirmative ratio
-        if external_plausible_ratio + affirmative_ratio > 0:
-            external_score = 2 * external_plausible_ratio * affirmative_ratio / (external_plausible_ratio + affirmative_ratio)
-        else:
-            external_score = 0.0
-        self.results_dict['external']['score']['harmonic_mean'] = external_score
-        self.results_dict['external']['score']['affirmativeness_score'] = affirmative_ratio
-        self.results_dict['external']['score']['consistency_score'] = external_plausible_ratio
+        # External score: Wilson Score Lower Bound
+        external_score = self.wilson_score_lower_bound(supported_count, total_claim_count)
+        self.results_dict['external']['score']['wilson_score'] = external_score
+        self.results_dict['external']['score']['supported_count'] = supported_count
+        self.results_dict['external']['score']['total_claim_count'] = total_claim_count
     
     def intra_session_eval(self, history: List[Turn]):
         completion_kwargs_list = []

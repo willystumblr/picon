@@ -73,7 +73,7 @@ export default function ConsentPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/start', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

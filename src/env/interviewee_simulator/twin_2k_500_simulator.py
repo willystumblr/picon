@@ -34,7 +34,7 @@ class Twin2K500Simulator(BaseIntervieweeSimulator):
                 "role": "user",
                 "content": message
             })
-            
+        self._truncate_history()    
         completion_kwargs = {
             "model": self.simulator_model,
             "messages": self.history,

@@ -1,7 +1,10 @@
 from litellm.cost_calculator import completion_cost
+from litellm import get_max_tokens
+import tiktoken
 from src.utils import get_completion
 from src.schemas import Action, IntervieweeResponse
 from src.env.interviewee_simulator.base_interviewee_simulator import BaseIntervieweeSimulator
+import logging
 
 class DeepPersonaSimulator(BaseIntervieweeSimulator):
     def __init__(self, **kwargs):
@@ -28,13 +31,14 @@ class DeepPersonaSimulator(BaseIntervieweeSimulator):
         self.simulator_model = kwargs['simulator_model']
         self.host = kwargs.get('simulator_host', None)
         self.port = kwargs.get('port', None)
-        
+
     def _get_response(self, message: str) -> IntervieweeResponse:
         self.history.append({
             "role": "user",
             "content": f"user request: {message}"
         })
-            
+        self._truncate_history()
+
         completion_kwargs = {
             "model": self.simulator_model,
             "messages": self.history,

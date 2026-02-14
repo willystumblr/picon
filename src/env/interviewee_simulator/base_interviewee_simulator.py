@@ -21,6 +21,7 @@ class BaseIntervieweeSimulator:
         if self.__nhd_model.startswith("hosted_vllm/"):
             assert self.__nhd_port is not None, "NHD port must be provided for hosted_vllm models"
         self.cost = 0.0
+        self.max_tokens = self.__get_max_token() if not self.type in ["consistent_llm", "opencharacter"] else 8192  # set a high max token limit for consistent_llm since we will handle truncation ourselves
         
         
     def get_response(self, message: str) -> IntervieweeResponse:
@@ -38,6 +39,44 @@ class BaseIntervieweeSimulator:
         logging.error(f"All attempts failed. Errors:\n{error_message}")
         raise RuntimeError(f"Failed to get persona response after 3 attempts. Errors:\n{error_message}")
     
+    ##########################################################################
+    ##                                                                      ##
+    ##                            HELPER METHODS                            ##
+    ##                                                                      ##
+    ##########################################################################
+
+    def __get_max_token(self):
+        if self.simulator_model.startswith("hosted_vllm/"):
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(self.simulator_model[len("hosted_vllm/"):])
+            self.tokenizer = tokenizer
+            return tokenizer.model_max_length
+        else:
+            from litellm import get_model_info, token_counter
+            self.tokenizer = token_counter
+            return get_model_info(self.simulator_model)['max_input_tokens']
+
+    def _count_tokens(self, messages):
+        if self.simulator_model.startswith("hosted_vllm/"):
+            input_ids = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=True,
+                return_tensors="pt",
+                add_generation_prompt=True,
+            )
+            return input_ids.shape[1]
+        else:
+            return self.tokenizer(model=self.simulator_model, messages=messages)
+
+    def _truncate_history(self):
+        """
+        when the history is too long (> self.max_tokens), we need to truncate the history to fit the max tokens limit of the model
+        """
+        while self._count_tokens(self.history) > self.max_tokens and len(self.history) > 2:
+            # Remove the oldest non-system message pair ([1] and [2]) to preserve the system prompt at [0]
+            self.history.pop(1)
+            self.history.pop(1)
+
     def _get_response(self, message: str) -> IntervieweeResponse:
         raise NotImplementedError("This method should be implemented by subclasses.")
     

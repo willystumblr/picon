@@ -44,26 +44,8 @@ class OpenCharacterSimulator(BaseIntervieweeSimulator):
                 "role": "user",
                 "content": message
             })
-            
-        while True:
-            input_ids = self.tokenizer.apply_chat_template(
-                self.history,
-                tokenize=True,
-                return_tensors="pt",
-                add_generation_prompt=True,
-            )
+        self._truncate_history()
 
-            if input_ids.shape[1] + 1024 <= 8192:
-                break
-
-            # drop oldest assistant-user pair but keep system prompt
-            if len(self.history) > 3:
-                self.history = [self.history[0]] + self.history[3:]
-            else:
-                # still too long even after pruning – fallback
-                self.history = [self.history[0]] + self.history[-2:]
-
-        
         res = get_completion(
             model=self.simulator_model,
             messages=self.history,

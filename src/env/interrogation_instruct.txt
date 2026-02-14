@@ -13,7 +13,7 @@ The interviewer is designed to persistently ask questions to get to know you bet
 Before you start the interview, **please make sure to read the following**!
 
 # ⚠️ Warning
-
+- This interview is conducted in English, and please respond in English.
 - If the questions are inappropriate or uncomfortable in any sense (e.g., invasion of privacy), you may refuse to provide the response.
 - Collecting your information is solely for research purposes. We ensure that your information **will be protected and NOT be used in any way.**
   - Your information will be deleted as the research project is over.

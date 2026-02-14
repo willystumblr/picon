@@ -44,10 +44,10 @@ app.add_middleware(
 sessions: Dict[str, WebInterrogationEnv] = {}
 
 # Fixed parameters for human interview
-Q_MODEL = "gpt-5"
-W_MODEL = "gpt-5"
-E_MODEL = "gpt-5.1"
-NHD_MODEL = "gpt-5-nano"
+Q_MODEL = "azure/gpt-5"
+W_MODEL = "azure/gpt-5"
+E_MODEL = "azure/gpt-5.1"
+NHD_MODEL = "azure/gpt-5-nano"
 NUM_TURNS = 40
 NUM_SESSIONS = 1
 

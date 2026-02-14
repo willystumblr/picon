@@ -681,6 +681,10 @@ Determine which label best fits."""
         get_to_knows = [turn for turn in history if turn.type == 'get_to_know']
         repeats = [turn for turn in history if turn.type == 'repeat']
         for original, repeat in zip(get_to_knows, repeats):
+            if "### QUESTION ###" in original.environment_observation[0].response.question:
+                # handle special formatting in some datasets
+                original.environment_observation[0].response.question = original.environment_observation[0].response.question.split("### QUESTION ###")[-1].strip()
+                repeat.environment_observation[0].response.question = repeat.environment_observation[0].response.question.split("### QUESTION ###")[-1].strip()
             assert original.environment_observation[0].response.question in repeat.environment_observation[0].response.question, f"Mismatch in questions between original and repeat. Original: '{original.environment_observation[0].response.question}', Repeat: '{repeat.environment_observation[0].response.question}'."
             
             completion_kwargs = dict(

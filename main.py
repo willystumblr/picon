@@ -122,7 +122,7 @@ def main(args, interviewee_kwarg):
     # eval_result = env.evaluate(histories)
     # results_complete["evaluation"] = eval_result
     # write_json(results_complete, result_path)
-    # logging.info(f"Saved results to {result_path}.")
+    logging.info(f"Saved results to {result_path}.")
 
 if __name__ == "__main__":
     args = parse_args()

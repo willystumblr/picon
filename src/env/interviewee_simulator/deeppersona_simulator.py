@@ -28,9 +28,9 @@ class DeepPersonaSimulator(BaseIntervieweeSimulator):
             }
         ]
         self.name = kwargs.get('name', 'whatchamacallit')
-        self.simulator_model = kwargs['simulator_model']
         self.host = kwargs.get('simulator_host', None)
         self.port = kwargs.get('port', None)
+        self.max_tokens = get_max_tokens(self.client_or_model)
 
     def _get_response(self, message: str) -> IntervieweeResponse:
         self.history.append({

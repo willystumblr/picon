@@ -14,13 +14,12 @@ from transformers import AutoTokenizer
 
 class OpenCharacterSimulator(BaseIntervieweeSimulator):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
         assert 'model_path' in kwargs, "OpenCharacter requires (path-like, either huggingface repo OR local path) model parameter"
         assert 'persona' in kwargs, "OpenCharacter requires persona parameter"
         assert 'profile' in kwargs, "OpenCharacter requires profile parameter"
         assert 'simulator_model' in kwargs, "OpenCharacter requires simulator_model parameter"
         assert 'port' in kwargs, "OpenCharacter requires port parameter"
-        
+        super().__init__(**kwargs)
         self.client_or_model = kwargs['model_path']
         
         self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model_path'])
@@ -38,6 +37,7 @@ class OpenCharacterSimulator(BaseIntervieweeSimulator):
         self.simulator_model = kwargs['simulator_model']
         self.host = kwargs.get('simulator_host', 'localhost')
         self.port = kwargs['port']
+        self.max_tokens = self.__get_max_token()
         
     def _get_response(self, message: str) -> IntervieweeResponse:
         self.history.append({

@@ -12,7 +12,6 @@ class BaseIntervieweeSimulator:
         load_dotenv()
         self.type = kwargs.get('baseline_name')
         self.name = kwargs.get('name', None)
-        
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
         self.__nhd_prompt = open(f"{project_root}/src/agents/prompts/nhd_detector.txt", "r").read()
@@ -21,7 +20,6 @@ class BaseIntervieweeSimulator:
         if self.__nhd_model.startswith("hosted_vllm/"):
             assert self.__nhd_port is not None, "NHD port must be provided for hosted_vllm models"
         self.cost = 0.0
-        self.max_tokens = self.__get_max_token() if not self.type in ["consistent_llm", "opencharacter"] else 8192  # set a high max token limit for consistent_llm since we will handle truncation ourselves
         
         
     def get_response(self, message: str) -> IntervieweeResponse:
@@ -46,18 +44,18 @@ class BaseIntervieweeSimulator:
     ##########################################################################
 
     def __get_max_token(self):
-        if self.simulator_model.startswith("hosted_vllm/"):
+        if self.client_or_model.startswith("hosted_vllm/"):
             from transformers import AutoTokenizer
-            tokenizer = AutoTokenizer.from_pretrained(self.simulator_model[len("hosted_vllm/"):])
+            tokenizer = AutoTokenizer.from_pretrained(self.client_or_model[len("hosted_vllm/"):])
             self.tokenizer = tokenizer
             return tokenizer.model_max_length
         else:
             from litellm import get_model_info, token_counter
             self.tokenizer = token_counter
-            return get_model_info(self.simulator_model)['max_input_tokens']
+            return get_model_info(self.client_or_model)['max_input_tokens']
 
     def _count_tokens(self, messages):
-        if self.simulator_model.startswith("hosted_vllm/"):
+        if self.client_or_model.startswith("hosted_vllm/"):
             input_ids = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=True,
@@ -66,7 +64,7 @@ class BaseIntervieweeSimulator:
             )
             return input_ids.shape[1]
         else:
-            return self.tokenizer(model=self.simulator_model, messages=messages)
+            return self.tokenizer(model=self.client_or_model, messages=messages)
 
     def _truncate_history(self):
         """

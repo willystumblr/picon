@@ -428,14 +428,14 @@ Determine which label best fits."""
                     conf_question = conf_obs.response.question
                     conf_response = conf_obs.response.content
 
-                    # Add to eval items (confirmation question) for uncooperative/internal checks
-                    eval_items.append({
-                        'turn_idx': turn_idx,
-                        'question': conf_question,
-                        'response': conf_response,
-                        'is_confirmation': True,
-                        'qa_history': qa_history  # Q&A history up to this point (for internal check)
-                    })
+                    # # Add to eval items (confirmation question) for uncooperative/internal checks
+                    # eval_items.append({
+                    #     'turn_idx': turn_idx,
+                    #     'question': conf_question,
+                    #     'response': conf_response,
+                    #     'is_confirmation': True,
+                    #     'qa_history': qa_history  # Q&A history up to this point (for internal check)
+                    # })
 
                     # Add to external eval items (for external consistency check)
                     external_eval_items.append({
@@ -460,7 +460,7 @@ Determine which label best fits."""
         qa_pairs = [{
             "question": item['question'],
             "response": item['response'],
-            "log_prompt": (i < 3)
+            # "log_prompt": (i < 3)
         } for i, item in enumerate(eval_items)]
 
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -472,7 +472,7 @@ Determine which label best fits."""
         confirmation_qa_pairs = [{
             "question": item['confirmation_question'],
             "response": item['confirmation_response'],
-            "log_prompt": (i < 3)
+            # "log_prompt": (i < 3)
         } for i, item in enumerate(external_eval_items)]
 
         affirmative_results = []
@@ -530,13 +530,13 @@ Determine which label best fits."""
         # Step 4: Internal consistency check (need at least 2 items for previous context)
         # Internal check: skip first item as it has no prior context
         if len(eval_items) >= 2:
-            consistency_eval_items = eval_items[1:]
+            consistency_eval_items = eval_items[1:]  # only evaluate regular questions for internal consistency
             consistency_uncoop_results = uncooperative_results[1:]
 
             # Internal consistency check for all items (from 2nd item)
             def generate_internal_wrapper(args):
                 item, idx = args
-                return self.__generate_internal_consistency_verdict(item['qa_history'], item['question'], item['response'], log_prompt=(idx < 3))
+                return self.__generate_internal_consistency_verdict(item['qa_history'], item['question'], item['response'])
 
             with ThreadPoolExecutor(max_workers=2) as executor:
                 internal_results = list(tqdm(executor.map(generate_internal_wrapper, [(item, idx) for idx, item in enumerate(consistency_eval_items)]),
@@ -596,7 +596,7 @@ Determine which label best fits."""
                         search_result=task['search_result'],
                         main_question=task['main_question'],
                         main_response=task['main_response'],
-                        log_prompt=(idx < 3)
+                        # log_prompt=(idx < 3)
                     )
 
                 with ThreadPoolExecutor(max_workers=4) as executor:

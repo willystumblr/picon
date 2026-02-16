@@ -600,6 +600,8 @@ class WebInterrogationEnv:
             "env_cost": self.env_cost,
             "start_time": self.start_time,
             "cutoff_date": self.cutoff_date,
+            # Store the shuffled questions order to preserve on recovery
+            "predefined_questions": self.predefined_questions,
         }
     
     def restore_from_redis(self, data: dict) -> None:
@@ -636,6 +638,10 @@ class WebInterrogationEnv:
         self.env_cost = data["env_cost"]
         self.start_time = data["start_time"]
         self.cutoff_date = data["cutoff_date"]
+        
+        # Restore the original shuffled questions order
+        if "predefined_questions" in data:
+            self.predefined_questions = data["predefined_questions"]
         
         logging.info(f"[REDIS] Restored session for {self.interviewee.name} at phase={self.current_phase}, turn={self.state.current_turn}")
 

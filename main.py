@@ -54,6 +54,7 @@ def parse_args():
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
     parser.add_argument('--question_file_path', type=str, default='src/env/wvs_orthogonal_questions.json', help='Path to the pre-defined questions file.')
     parser.add_argument('--eval_factors', type=str, nargs='+', default=None, choices=['internal', 'external', 'intra', 'inter'], help='Evaluation factors to compute. If not specified, all factors are evaluated.')
+    parser.add_argument('--do_eval', action='store_true', help='Whether to run evaluation after interview sessions.')
     
     return parser.parse_args()
 
@@ -96,6 +97,13 @@ def main(args, interviewee_kwarg):
         "num_turns_completed": 0,
         "num_tool_calls": 0,
         "sessions_completed": 0,
+        # Evaluation scores (None if not evaluated)
+        "eval_internal_harmonic_mean": None,
+        "eval_internal_responsiveness": None,
+        "eval_internal_consistency": None,
+        "eval_external_wilson": None,
+        "eval_stability_inter_session": None,
+        "eval_stability_intra_session": None,
     }
     
     tools = {
@@ -141,10 +149,32 @@ def main(args, interviewee_kwarg):
         
         results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
         write_json(results_complete, result_path)
-        # Inter-session evaluation
-        eval_result = env.evaluate(histories, eval_factors=args.eval_factors)
-        results_complete["evaluation"] = eval_result
-        write_json(results_complete, result_path)
+        
+        # Inter-session evaluation (only if --do_eval is set)
+        if args.do_eval:
+            eval_result = env.evaluate(histories, eval_factors=args.eval_factors)
+            results_complete["evaluation"] = eval_result
+            write_json(results_complete, result_path)
+            
+            # Extract evaluation scores for aggregation
+            if eval_result:
+                internal = eval_result.get("internal", {})
+                external = eval_result.get("external", {})
+                stability = eval_result.get("stability", {})
+                
+                internal_score = internal.get("score", {})
+                persona_stats["eval_internal_harmonic_mean"] = internal_score.get("harmonic_mean")
+                persona_stats["eval_internal_responsiveness"] = internal_score.get("responsiveness_score")
+                persona_stats["eval_internal_consistency"] = internal_score.get("consistency_score")
+                
+                external_score = external.get("score", {})
+                persona_stats["eval_external_wilson"] = external_score.get("wilson_score")
+                
+                inter_session = stability.get("inter_session", {})
+                intra_session = stability.get("intra_session", {})
+                persona_stats["eval_stability_inter_session"] = inter_session.get("score")
+                persona_stats["eval_stability_intra_session"] = intra_session.get("score")
+        
         logging.info(f"Saved results to {result_path}.")
         
         # Collect stats from completed sessions
@@ -182,12 +212,16 @@ def main(args, interviewee_kwarg):
         if "AI Detected" in str(e):
             persona_stats["ai_detected"] = True
             persona_stats["error_type"] = "AI Detected"
+            # For AI detected cases, inter-session score should be 0.0
+            persona_stats["eval_stability_inter_session"] = 0.0
             logging.warning(f"AI Detected for persona {persona_stats['name']}")
         else:
             persona_stats["error_type"] = str(e)
         return persona_stats
     except Exception as e:
         persona_stats["error_type"] = str(e)
+        # For failed cases, inter-session score should be 0.0
+        persona_stats["eval_stability_inter_session"] = 0.0
         logging.exception(f"Error for persona {persona_stats['name']}: {e}")
         return persona_stats
 
@@ -438,6 +472,13 @@ if __name__ == "__main__":
                     "num_turns_completed": 0,
                     "num_tool_calls": 0,
                     "sessions_completed": 0,
+                    # Failed personas get 0.0 for inter-session
+                    "eval_internal_harmonic_mean": None,
+                    "eval_internal_responsiveness": None,
+                    "eval_internal_consistency": None,
+                    "eval_external_wilson": None,
+                    "eval_stability_inter_session": 0.0,
+                    "eval_stability_intra_session": None,
                 })
     
     # Aggregate baseline statistics
@@ -502,6 +543,34 @@ if __name__ == "__main__":
             "per_persona_details": all_persona_stats,
         }
         
+        # Add evaluation score aggregates if --do_eval was set
+        if args.do_eval:
+            # Helper function to compute average of non-None values
+            def avg_score(key):
+                values = [s.get(key) for s in all_persona_stats if s.get(key) is not None]
+                return sum(values) / len(values) if values else None
+            
+            # For inter-session: include 0.0 scores from failed/AI-detected personas
+            def avg_inter_session_score():
+                values = [s.get("eval_stability_inter_session") for s in all_persona_stats 
+                          if s.get("eval_stability_inter_session") is not None]
+                return sum(values) / len(values) if values else None
+            
+            baseline_summary["evaluation_scores"] = {
+                "internal": {
+                    "avg_harmonic_mean": avg_score("eval_internal_harmonic_mean"),
+                    "avg_responsiveness_score": avg_score("eval_internal_responsiveness"),
+                    "avg_consistency_score": avg_score("eval_internal_consistency"),
+                },
+                "external": {
+                    "avg_wilson_score": avg_score("eval_external_wilson"),
+                },
+                "stability": {
+                    "avg_inter_session_score": avg_inter_session_score(),
+                    "avg_intra_session_score": avg_score("eval_stability_intra_session"),
+                },
+            }
+        
         # Save baseline summary with timestamp
         summary_path = f"{args.output_dir}/{args.baseline_name}/baseline_summary_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
         os.makedirs(os.path.dirname(summary_path), exist_ok=True)
@@ -517,6 +586,21 @@ if __name__ == "__main__":
         logging.info(f"Avg duration per persona: {total_duration/total_personas:.2f} min")
         logging.info(f"Avg interviewee responses: {total_responses/total_personas:.1f}")
         logging.info(f"Total cost: ${total_cost:.4f} (avg ${total_cost/total_personas:.4f}/persona)")
+        
+        if args.do_eval and "evaluation_scores" in baseline_summary:
+            eval_scores = baseline_summary["evaluation_scores"]
+            logging.info("-"*40)
+            logging.info("EVALUATION SCORES (averages):")
+            internal = eval_scores.get("internal", {})
+            external = eval_scores.get("external", {})
+            stability = eval_scores.get("stability", {})
+            logging.info(f"  Internal - Harmonic Mean: {internal.get('avg_harmonic_mean', 'N/A')}")
+            logging.info(f"  Internal - Responsiveness: {internal.get('avg_responsiveness_score', 'N/A')}")
+            logging.info(f"  Internal - Consistency: {internal.get('avg_consistency_score', 'N/A')}")
+            logging.info(f"  External - Wilson: {external.get('avg_wilson_score', 'N/A')}")
+            logging.info(f"  Stability - Inter-session: {stability.get('avg_inter_session_score', 'N/A')}")
+            logging.info(f"  Stability - Intra-session: {stability.get('avg_intra_session_score', 'N/A')}")
+        
         logging.info(f"Summary saved to: {summary_path}")
         logging.info("="*60)
     

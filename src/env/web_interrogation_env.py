@@ -575,6 +575,70 @@ class WebInterrogationEnv:
             },
         }
 
+    def serialize_for_redis(self) -> dict:
+        """Serialize environment state for Redis storage."""
+        return {
+            "name": self.interviewee.name,
+            "current_phase": self.current_phase,
+            "predefined_index": self.predefined_index,
+            "main_turn_count": self.main_turn_count,
+            "repeat_index": self.repeat_index,
+            "is_complete": self.is_complete,
+            "state_current_turn": self.state.current_turn,
+            "state_history": [turn.model_dump() for turn in self.state.history],
+            "agent_memories": {
+                agent_name: agent.memory for agent_name, agent in self.agents.items()
+            },
+            "agent_costs": {
+                agent_name: agent.cost for agent_name, agent in self.agents.items()
+            },
+            "pending_question": self.pending_question,
+            "pending_confirmations": self.pending_confirmations,
+            "last_confirmation_question": getattr(self, '_last_confirmation_question', None),
+            "repeat_score": self.repeat_score,
+            "repeat_results": self.repeat_results,
+            "env_cost": self.env_cost,
+            "start_time": self.start_time,
+            "cutoff_date": self.cutoff_date,
+        }
+    
+    def restore_from_redis(self, data: dict) -> None:
+        """Restore environment state from Redis data."""
+        # Restore phase/progress state
+        self.current_phase = data["current_phase"]
+        self.predefined_index = data["predefined_index"]
+        self.main_turn_count = data["main_turn_count"]
+        self.repeat_index = data["repeat_index"]
+        self.is_complete = data["is_complete"]
+        
+        # Restore state history
+        self.state.current_turn = data["state_current_turn"]
+        self.state.history = [Turn(**turn_data) for turn_data in data["state_history"]]
+        
+        # Restore agent memories
+        for agent_name, memory in data["agent_memories"].items():
+            if agent_name in self.agents:
+                self.agents[agent_name].memory = memory
+        
+        # Restore agent costs
+        for agent_name, cost in data.get("agent_costs", {}).items():
+            if agent_name in self.agents:
+                self.agents[agent_name].cost = cost
+        
+        # Restore pending questions
+        self.pending_question = data["pending_question"]
+        self.pending_confirmations = data["pending_confirmations"]
+        self._last_confirmation_question = data.get("last_confirmation_question")
+        
+        # Restore tracking
+        self.repeat_score = data["repeat_score"]
+        self.repeat_results = data["repeat_results"]
+        self.env_cost = data["env_cost"]
+        self.start_time = data["start_time"]
+        self.cutoff_date = data["cutoff_date"]
+        
+        logging.info(f"[REDIS] Restored session for {self.interviewee.name} at phase={self.current_phase}, turn={self.state.current_turn}")
+
 
 class WebInterviewee:
     """Minimal interviewee class for web interface (no input() calls)."""

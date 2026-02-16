@@ -5,12 +5,14 @@ Deployed as Vercel serverless function.
 import os
 import uuid
 import time
+import json
 import logging
 from typing import Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import redis
 
 # Import from src
 import sys
@@ -40,8 +42,84 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session storage (for serverless, consider Redis for production)
+# In-memory session storage (primary) + Redis backup for recovery
 sessions: Dict[str, WebInterrogationEnv] = {}
+
+# Redis connection (optional - gracefully degrade if not available)
+redis_client: Optional[redis.Redis] = None
+REDIS_SESSION_TTL = 7200  # 2 hours
+
+def get_redis_client() -> Optional[redis.Redis]:
+    """Get or create Redis client."""
+    global redis_client
+    if redis_client is not None:
+        return redis_client
+    
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url:
+        logger.warning("REDIS_URL not set - session recovery disabled")
+        return None
+    
+    try:
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+        redis_client.ping()  # Test connection
+        logger.info("Redis connected successfully")
+        return redis_client
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {e} - session recovery disabled")
+        return None
+
+def save_session_to_redis(session_id: str, env: WebInterrogationEnv) -> bool:
+    """Save session state to Redis. Returns True on success."""
+    client = get_redis_client()
+    if not client:
+        return False
+    
+    try:
+        data = env.serialize_for_redis()
+        client.setex(f"session:{session_id}", REDIS_SESSION_TTL, json.dumps(data))
+        logger.info(f"[REDIS] Saved session {session_id} (phase={data['current_phase']}, turn={data['state_current_turn']})")
+        return True
+    except Exception as e:
+        logger.warning(f"[REDIS] Failed to save session {session_id}: {e}")
+        return False
+
+def restore_session_from_redis(session_id: str) -> Optional[WebInterrogationEnv]:
+    """Restore session from Redis. Returns None if not found or failed."""
+    client = get_redis_client()
+    if not client:
+        return None
+    
+    try:
+        data_str = client.get(f"session:{session_id}")
+        if not data_str:
+            return None
+        
+        data = json.loads(data_str)
+        
+        # Create new env with same name
+        env = create_env(data["name"])
+        env.restore_from_redis(data)
+        
+        logger.info(f"[REDIS] Restored session {session_id}")
+        return env
+    except Exception as e:
+        logger.warning(f"[REDIS] Failed to restore session {session_id}: {e}")
+        return None
+
+def delete_session_from_redis(session_id: str) -> bool:
+    """Delete session from Redis. Returns True on success."""
+    client = get_redis_client()
+    if not client:
+        return False
+    
+    try:
+        client.delete(f"session:{session_id}")
+        logger.info(f"[REDIS] Deleted session {session_id}")
+        return True
+    except Exception as e:
+        logger.warning(f"[REDIS] Failed to delete session {session_id}: {e}")
+        return False
 
 # Fixed parameters for human interview
 Q_MODEL = "azure/gpt-5"
@@ -78,6 +156,15 @@ class RespondResponse(BaseModel):
 class ResultsResponse(BaseModel):
     session_id: str
     results: dict
+
+class RecoverResponse(BaseModel):
+    session_id: str
+    recovered: bool
+    current_question: Optional[str] = None
+    phase: str
+    progress: dict
+    is_complete: bool = False
+    message: str
 
 
 def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
@@ -136,6 +223,9 @@ def start_interview(request: StartInterviewRequest):
         
         sessions[session_id] = env
         
+        # Save initial state to Redis for recovery
+        save_session_to_redis(session_id, env)
+        
         return StartInterviewResponse(
             session_id=session_id,
             instruction=instruction,
@@ -159,6 +249,12 @@ def submit_response(request: RespondRequest):
         
         # Process response and get next question
         result = env.process_response(request.response, is_confirmation=request.is_confirmation)
+        
+        # Save to Redis after complete turns (when returning next_question, not confirmation_question)
+        # A turn is complete when: next_question is set OR is_complete is True
+        is_turn_complete = result.get("next_question") is not None or result.get("is_complete", False)
+        if is_turn_complete:
+            save_session_to_redis(request.session_id, env)
         
         return RespondResponse(
             next_question=result.get("next_question"),
@@ -199,8 +295,9 @@ def get_results(session_id: str):
         # Prepare response BEFORE deleting session
         response = ResultsResponse(session_id=session_id, results=results)
         
-        # Clean up session only after response is prepared
+        # Clean up session from memory and Redis
         del sessions[session_id]
+        delete_session_from_redis(session_id)
         logger.info(f"[{session_id}] Session cleaned up, returning response.")
         
         return response
@@ -212,9 +309,52 @@ def get_results(session_id: str):
         if session_id in sessions:
             try:
                 del sessions[session_id]
+                delete_session_from_redis(session_id)
             except Exception:
                 pass
         raise HTTPException(status_code=500, detail=f"Error processing results: {str(e)}")
+
+
+@app.get("/api/recover/{session_id}", response_model=RecoverResponse)
+def recover_session(session_id: str):
+    """Attempt to recover a session from Redis backup."""
+    # Check if already in memory
+    if session_id in sessions:
+        env = sessions[session_id]
+        return RecoverResponse(
+            session_id=session_id,
+            recovered=True,
+            current_question=env.pending_question,
+            phase=env.current_phase,
+            progress=env.get_progress(),
+            is_complete=env.is_complete,
+            message="Session found in memory"
+        )
+    
+    # Try to restore from Redis
+    env = restore_session_from_redis(session_id)
+    if env:
+        sessions[session_id] = env
+        return RecoverResponse(
+            session_id=session_id,
+            recovered=True,
+            current_question=env.pending_question,
+            phase=env.current_phase,
+            progress=env.get_progress(),
+            is_complete=env.is_complete,
+            message=f"Session recovered from backup (turn {env.state.current_turn})"
+        )
+    
+    # Session not found
+    return RecoverResponse(
+        session_id=session_id,
+        recovered=False,
+        current_question=None,
+        phase="unknown",
+        progress={},
+        is_complete=False,
+        message="Session not found or expired"
+    )
 
 
 @app.delete("/api/session/{session_id}")
@@ -231,4 +371,8 @@ def cancel_session(session_id: str):
         except Exception as e:
             logger.warning(f"Could not save partial results: {e}")
         del sessions[session_id]
+    
+    # Also delete from Redis
+    delete_session_from_redis(session_id)
+    
     return {"status": "ok"}

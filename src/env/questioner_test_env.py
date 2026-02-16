@@ -1,5 +1,5 @@
 import time
-from src.env.interviewee_simulator import IntervieweeSimulator
+from src.env.interviewee_simulator.simulator_factory import get_interviewee_simulator
 from typing import List, Dict, Any
 from src.agents.base_agent import Agent
 from src.agents.agent_factory import get_agent
@@ -48,10 +48,7 @@ class QuestionerTestEnv:
             logging.info("Setting web search agent tools from environment.")
             self.agents['web_search'].tools = [tool.get_info() for tool in self.tools.values()]
         
-        self.interviewee = IntervieweeSimulator(
-            baseline_name=baseline_name,
-            **kwargs # simulator specific args (character_id, user_id, name for characterai; model_path, persona, profile for opencharacter; name for human_simulacra)
-        )
+        self.interviewee = get_interviewee_simulator(baseline_name, **kwargs)
         self.max_turns = max_turns
         self.predefined_questions = random.sample(read_json(question_path), k=5)
         self.instruction = open(instruction_path).read()
@@ -367,56 +364,224 @@ Do not output any additional explanation or text."""
         return self.state
 
 if __name__ == "__main__":
-    from src.utils import setup_logging
+    from src.utils import setup_logging, read_jsonl
     from argparse import ArgumentParser
-    setup_logging(log_to_file=True, process_name="test_env")
+    from datasets import load_dataset
+    import re
+    import glob
+    
     load_dotenv()
 
     parser = ArgumentParser(description="Questioner Test Environment")
     parser.add_argument("--model", type=str, default="gpt-5", help="Model to use")
     parser.add_argument("--nhd_model", type=str, default="gpt-5", help="NHD model to use")
+    parser.add_argument("--simulator_model", type=str, default=None, help="Simulator model for LLM-based baselines")
     parser.add_argument("--max_turns", type=int, default=30, help="Maximum number of turns")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for persona selection")
     parser.add_argument("--human_interviewer", action="store_true", help="Use human simulacra as interviewer")
-    parser.add_argument("--human_interviewee", action="store_true", help="Use human simulacra as interviewee")
+    parser.add_argument("--baseline_name", type=str, required=True, 
+                        choices=['characterai', 'human_simulacra', 'naive_human_simulacra', 'opencharacter', 
+                                 'consistent_llm', 'human_interview', 'persona_hub', 'twin_2k_500', 
+                                 'deeppersona', 'llm_generated'],
+                        help="Baseline interviewee simulator to use")
+    parser.add_argument("--simulator_port", type=int, default=None, help="Port for the persona simulator")
+    parser.add_argument("--simulator_host", type=str, default='localhost', help="Host for the persona simulator")
+    parser.add_argument("--nhd_port", type=int, default=None, help="Port for the NH detector")
     args = parser.parse_args()
     
-    if args.human_interviewee:
-        env = QuestionerTestEnv(
-            model=args.model,
-            baseline_name="human_interview",
-            nhd_model=args.model,
-            max_turns=args.max_turns,
-            human_interviewer=args.human_interviewer,
-            tools={
-                "google_claim_search": GoogleClaimSearch(
-                    api_key=os.environ.get('GOOGLE_CLAIM_SEARCH'),
-                    cx=os.environ.get('GOOGLE_CX_ID')
-                ),
-                "google_geocode_validate": GoogleGeocodeValidate(api_key=os.environ.get('GOOGLE_GEOCODE'))
-            },
-        )
-
+    setup_logging(log_to_file=True, process_name="questioner_test_env")
+    random.seed(args.seed)
+    
+    # Build interviewee kwargs based on baseline
+    interviewee_kwargs = []
+    
+    if args.baseline_name == "characterai":
+        assert os.getenv('CAI_API_KEY') is not None, "Character AI requires CAI_API_KEY"
+        personas = read_json("src/env/personas/characterai.json")
+        for persona in personas:
+            interviewee_kwargs.append({
+                "baseline_name": "characterai",
+                "character_id": persona['character_id'],
+                "user_id": os.getenv('CAI_API_KEY'),
+                "name": persona['character_name'],
+                "nhd_model": args.nhd_model,
+                "nhd_port": args.nhd_port,
+            })
+    
+    elif "human_simulacra" in args.baseline_name:
+        names = ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami Clark", 
+                 "Michael Miller", "Kevin Kelly", "Erica Walker", "Leslie Nichols", "Robert Scott", "Marsh Zhaleh"]
+        for name in names:
+            interviewee_kwargs.append({
+                "baseline_name": args.baseline_name,
+                "name": name,
+                "nhd_model": args.nhd_model,
+                "simulator_model": args.simulator_model,
+                "nhd_port": args.nhd_port,
+            })
+    
+    elif args.baseline_name == "opencharacter":
+        dataset = load_dataset("xywang1/OpenCharacter", "Synthetic-Character", split="train")
+        for data in dataset:
+            name_match = re.match(r"Name:\s(.*)\n", data['character'])
+            if not name_match:
+                continue
+            interviewee_kwargs.append({
+                "baseline_name": "opencharacter",
+                "model_path": "willystumblr/opencharacter-sft-2025-06-21_14-54-13",
+                "persona": data['persona'],
+                "profile": data['character'],
+                "name": name_match.group(1).strip(),
+                "load_in_4bit": True,
+                "nhd_model": args.nhd_model,
+                "simulator_model": args.simulator_model,
+                "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
+                "nhd_port": args.nhd_port,
+            })
+    
+    elif args.baseline_name == "consistent_llm":
+        dataset = read_jsonl("src/env/personas/consistent_llm_personas.jsonl")
+        for data in dataset:
+            interviewee_kwargs.append({
+                "baseline_name": "consistent_llm",
+                "model_path": "/home/edlab/sjim/consistent-LLMs/rl_training/checkpoints/chatting/llama-8b-sft-ppo-prompt",
+                "persona": data['persona'],
+                "name": data['name'],
+                "counterpart_name": data['counterpart_name'],
+                "instruction": data['instruction'],
+                "nhd_model": args.nhd_model,
+                "nhd_port": args.nhd_port,
+                "simulator_model": args.simulator_model,
+                "simulator_host": args.simulator_host,
+                "port": args.simulator_port,
+            })
+    
+    elif args.baseline_name == "persona_hub":
+        dataset = read_jsonl("src/env/personas/persona_hub/named_personas_with_key.jsonl")
+        for data in dataset:
+            data['persona'] = data['persona'][0].lower() + data['persona'][1:] if len(data['persona']) > 1 else data['persona'].lower()
+            interviewee_kwargs.append({
+                "baseline_name": "persona_hub",
+                "persona": data['persona'],
+                "name": data['name'],
+                "nhd_model": args.nhd_model,
+                "nhd_port": args.nhd_port,
+                "simulator_model": args.simulator_model,
+                "simulator_host": args.simulator_host,
+                "port": args.simulator_port,
+            })
+    
+    elif args.baseline_name == "human_interview":
+        interviewee_kwargs.append({
+            "baseline_name": "human_interview",
+            "name": input("Enter your name: "),
+            "nhd_model": args.nhd_model,
+            "nhd_port": args.nhd_port,
+        })
+    
+    elif args.baseline_name == "twin_2k_500":
+        dataset = load_dataset("LLM-Digital-Twin/Twin-2K-500", "full_persona", split="data")
+        for data in dataset:
+            name = f"Twin-{data['pid']}"
+            interviewee_kwargs.append({
+                "baseline_name": "twin_2k_500",
+                "simulator_model": args.simulator_model,
+                "persona": data['persona_json'],
+                "name": name,
+                "nhd_model": args.nhd_model,
+                "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
+            })
+    
+    elif args.baseline_name == "deeppersona":
+        dataset_path = "/home/data_storage/deeppersona"
+        persona_files = glob.glob(os.path.join(dataset_path, "*.json"))
+        for persona_file in persona_files:
+            data = read_json(persona_file)
+            name = os.path.basename(persona_file).replace(".json", "")
+            interviewee_kwargs.append({
+                "baseline_name": "deeppersona",
+                "simulator_model": args.simulator_model,
+                "persona": data,
+                "name": name,
+                "nhd_model": args.nhd_model,
+                "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
+            })
+    
+    elif args.baseline_name == "llm_generated":
+        dataset = load_dataset("Tianyi-Lab/Personas", split="train")
+        preferred_prefixes = ["Llama-3.1-70B-Instruct"]
+        available_prefixes = [
+            col[: -len("_descriptive_persona")]
+            for col in dataset.column_names
+            if col.endswith("_descriptive_persona")
+        ]
+        selected_prefix = None
+        for prefix in preferred_prefixes:
+            if prefix in available_prefixes:
+                selected_prefix = prefix
+                break
+        if selected_prefix is None and available_prefixes:
+            selected_prefix = available_prefixes[0]
+        if selected_prefix is None:
+            raise ValueError("No persona columns found in Tianyi-Lab/Personas.")
+        
+        for data in dataset:
+            persona_number = data.get("persona_number")
+            persona = {
+                "meta_persona": data.get("meta_persona", ""),
+                "descriptive_persona": data.get(f"{selected_prefix}_descriptive_persona", ""),
+                "objective_table_persona": data.get(f"{selected_prefix}_objective_table_persona", ""),
+                "subjective_table_persona": data.get(f"{selected_prefix}_subjective_table_persona", ""),
+            }
+            interviewee_kwargs.append({
+                "baseline_name": "llm_generated",
+                "simulator_model": args.simulator_model,
+                "persona": persona,
+                "name": f"LLM-Persona-{persona_number}" if persona_number is not None else "LLM-Persona-unknown",
+                "nhd_model": args.nhd_model,
+                "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
+            })
+    
     else:
-        env = QuestionerTestEnv(
-            model=args.model,
-            baseline_name="characterai",
-            character_id="6HhWfeDjetnxESEcThlBQtEUo0O8YHcXyHqCgN7b2hY", # example character id
-            user_id=os.environ.get('CAI_API_KEY'),
-            name="Elon Musk",
-            tools={
-                "google_claim_search": GoogleClaimSearch(
-                    api_key=os.environ.get('GOOGLE_CLAIM_SEARCH'),
-                    cx=os.environ.get('GOOGLE_CX_ID')
-                ),
-                "google_geocode_validate": GoogleGeocodeValidate(api_key=os.environ.get('GOOGLE_GEOCODE'))
-            },
-            max_turns=args.max_turns,
-            nhd_model=args.model,
-            human_interviewer=args.human_interviewer
-        )
+        raise ValueError(f"Invalid baseline name: {args.baseline_name}")
+    
+    # Randomly select ONE persona from the baseline
+    if not interviewee_kwargs:
+        raise ValueError(f"No personas found for baseline: {args.baseline_name}")
+    
+    selected_kwargs = random.choice(interviewee_kwargs)
+    logging.info(f"Selected persona: {selected_kwargs.get('name', 'unknown')} from baseline: {args.baseline_name}")
+    
+    # Create environment with selected persona
+    tools = {
+        "google_claim_search": GoogleClaimSearch(
+            api_key=os.environ.get('GOOGLE_CLAIM_SEARCH'),
+            cx=os.environ.get('GOOGLE_CX_ID')
+        ),
+        "google_geocode_validate": GoogleGeocodeValidate(api_key=os.environ.get('GOOGLE_GEOCODE'))
+    }
+    
+    env = QuestionerTestEnv(
+        model=args.model,
+        tools=tools,
+        max_turns=args.max_turns,
+        human_interviewer=args.human_interviewer,
+        **selected_kwargs
+    )
+    
+    # Run the test
     state = env.reset()
     done = False
     while not done:
         state, done = env.step()
     env.finalize()
-    env.save_state(f"data/prompt_engineering/questioner/questioner_test_history_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    
+    # Save results
+    output_dir = f"data/prompt_engineering/questioner/{args.baseline_name}"
+    os.makedirs(output_dir, exist_ok=True)
+    persona_name = selected_kwargs.get('name', 'unknown').replace(' ', '_')
+    env.save_state(f"{output_dir}/questioner_test_{persona_name}_{time.strftime('%Y%m%d_%H%M%S')}.json")

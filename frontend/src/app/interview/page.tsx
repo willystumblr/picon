@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { getRecoverableSessionId, setRecoverableSessionId, clearRecoverableSessionId } from '@/lib/storage';
 
 interface Message {
   id: string;
@@ -29,6 +30,16 @@ interface SessionData {
   phase: string;
   progress: Progress;
   name: string;
+}
+
+interface RecoverResponse {
+  session_id: string;
+  recovered: boolean;
+  current_question: string | null;
+  phase: string;
+  progress: Progress;
+  is_complete: boolean;
+  message: string;
 }
 
 // Helper function to detect URLs and render them as clickable links
@@ -74,31 +85,93 @@ export default function InterviewPage() {
   const [isComplete, setIsComplete] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [isAwaitingConfirmation, setIsAwaitingConfirmation] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   useEffect(() => {
-    // Load session from sessionStorage
-    const stored = sessionStorage.getItem('interviewSession');
-    if (!stored) {
-      router.push('/');
-      return;
-    }
+    const initSession = async () => {
+      // First, check if there's a stored session to recover
+      const storedSessionId = getRecoverableSessionId();
+      
+      if (storedSessionId) {
+        setIsRecovering(true);
+        try {
+          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/recover/${storedSessionId}`);
+          if (response.ok) {
+            const data: RecoverResponse = await response.json();
+            
+            if (data.recovered && data.current_question) {
+              // Successfully recovered - restore session
+              const recoveredSession: SessionData = {
+                sessionId: data.session_id,
+                instruction: '', // Not needed for recovery
+                currentQuestion: data.current_question,
+                phase: data.phase,
+                progress: data.progress,
+                name: '', // Not needed for recovery
+              };
+              
+              setSessionData(recoveredSession);
+              setProgress(data.progress);
+              setIsComplete(data.is_complete);
+              
+              // Show recovery message and current question
+              setMessages([
+                {
+                  id: 'recovery',
+                  type: 'system',
+                  content: `🔄 Session recovered! ${data.message}`,
+                  timestamp: new Date(),
+                },
+                {
+                  id: 'q-recovered',
+                  type: 'system',
+                  content: data.current_question,
+                  timestamp: new Date(),
+                },
+              ]);
+              
+              setIsRecovering(false);
+              return; // Don't fall through to normal init
+            }
+          }
+        } catch (err) {
+          console.error('Recovery failed:', err);
+        }
+        
+        // Recovery failed - clear stored session and continue to normal flow
+        clearRecoverableSessionId();
+        setIsRecovering(false);
+      }
+      
+      // Normal flow: load from sessionStorage
+      const stored = sessionStorage.getItem('interviewSession');
+      if (!stored) {
+        router.push('/');
+        return;
+      }
 
-    const data: SessionData = JSON.parse(stored);
-    setSessionData(data);
-    setProgress(data.progress);
+      const data: SessionData = JSON.parse(stored);
+      setSessionData(data);
+      setProgress(data.progress);
+      
+      // Store session ID for recovery
+      setRecoverableSessionId(data.sessionId);
 
-    // Initialize messages with first question
-    setMessages([
-      {
-        id: 'q-0',
-        type: 'system',
-        content: data.currentQuestion,
-        timestamp: new Date(),
-      },
-    ]);
+      // Initialize messages with first question
+      setMessages([
+        {
+          id: 'q-0',
+          type: 'system',
+          content: data.currentQuestion,
+          timestamp: new Date(),
+        },
+      ]);
+    };
+    
+    initSession();
   }, [router]);
 
   useEffect(() => {
@@ -176,6 +249,9 @@ export default function InterviewPage() {
           clearTimeout(timeoutId);
           
           if (resultsResponse.ok) {
+            // Clear stored session ID since interview is complete
+            clearRecoverableSessionId();
+            
             setMessages((prev) => [
               ...prev,
               {
@@ -271,8 +347,11 @@ export default function InterviewPage() {
 
   if (!sessionData) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center flex-col gap-4">
         <div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+        {isRecovering && (
+          <p className="text-gray-600 text-sm">Recovering your session...</p>
+        )}
       </div>
     );
   }

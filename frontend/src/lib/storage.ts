@@ -8,6 +8,7 @@ export const STORAGE_KEYS = {
   CONSENT_STATE: 'consentState',
   LANGUAGE_PREFERENCE: 'languagePreference',
   INTERVIEW_SESSION: 'interviewSession',
+  RECOVERABLE_SESSION_ID: 'recoverableSessionId',  // localStorage key for recovery
 } as const;
 
 /**
@@ -78,4 +79,28 @@ export function getSessionData(): SessionData | null {
     language: state.language,
     consentTimestamp: state.timestamp || new Date().toISOString(),
   };
+}
+
+/**
+ * Store session ID in localStorage for recovery across page reloads
+ */
+export function setRecoverableSessionId(sessionId: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEYS.RECOVERABLE_SESSION_ID, sessionId);
+}
+
+/**
+ * Get recoverable session ID from localStorage
+ */
+export function getRecoverableSessionId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(STORAGE_KEYS.RECOVERABLE_SESSION_ID);
+}
+
+/**
+ * Clear recoverable session ID from localStorage
+ */
+export function clearRecoverableSessionId(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(STORAGE_KEYS.RECOVERABLE_SESSION_ID);
 }

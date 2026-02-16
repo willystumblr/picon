@@ -200,16 +200,19 @@ if __name__ == "__main__":
                 "port": args.simulator_port
             })
     elif args.baseline_name == "persona_hub":
-        #dataset = load_dataset("proj-persona/PersonaHub", "persona", split="train")
-        dataset = read_jsonl("src/env/personas/persona_hub/named_personas_with_key.jsonl")
-        # if args.do_sample:
-        #     dataset = dataset.shuffle(seed=args.seed).select(range(10))
+        dataset = load_dataset("proj-persona/PersonaHub", "persona", split="train", download_mode="force_redownload")
+        #dataset = read_jsonl("src/env/personas/persona_hub/named_personas_with_key.jsonl")
         if args.do_sample:
-            import random
-            random.seed(args.seed)
-            dataset = random.sample(dataset, k=10)
-        for data in dataset:
-            data['persona'] = data['persona'][0].lower() + data['persona'][1:] if len(data['persona']) > 1 else data['persona'].lower()
+            dataset = dataset.shuffle(seed=args.seed).select(range(10))
+        # if args.do_sample:
+        #     import random
+        #     random.seed(args.seed)
+        #     dataset = random.sample(dataset, k=10)
+        
+        for id, data in enumerate(dataset):
+            #breakpoint()
+            #data['persona'] = data['persona'][0].lower() + data['persona'][1:] if len(data['persona']) > 1 else data['persona'].lower()
+            data['name'] = f"PersonaHub-{id}"
             interviewee_kwargs.append({
                 "baseline_name": "persona_hub",
                 "persona": data['persona'],

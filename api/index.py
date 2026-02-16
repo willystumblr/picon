@@ -157,6 +157,10 @@ class ResultsResponse(BaseModel):
     session_id: str
     results: dict
 
+class ConversationMessage(BaseModel):
+    question: str
+    answer: str
+
 class RecoverResponse(BaseModel):
     session_id: str
     recovered: bool
@@ -165,6 +169,22 @@ class RecoverResponse(BaseModel):
     progress: dict
     is_complete: bool = False
     message: str
+    conversation_history: list[ConversationMessage] = []
+    name: Optional[str] = None
+
+
+def extract_conversation_history(env: WebInterrogationEnv) -> list[dict]:
+    """Extract Q&A pairs from environment state history."""
+    history = []
+    for turn in env.state.history:
+        # Each turn has environment_observation which may contain interviewee responses
+        for obs in turn.environment_observation:
+            if obs.observation_type == "interviewee_response" and obs.response:
+                history.append({
+                    "question": obs.response.question,
+                    "answer": obs.response.content
+                })
+    return history
 
 
 def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
@@ -328,7 +348,9 @@ def recover_session(session_id: str):
             phase=env.current_phase,
             progress=env.get_progress(),
             is_complete=env.is_complete,
-            message="Session found in memory"
+            message="Session found in memory",
+            conversation_history=extract_conversation_history(env),
+            name=env.interviewee.name
         )
     
     # Try to restore from Redis
@@ -342,7 +364,9 @@ def recover_session(session_id: str):
             phase=env.current_phase,
             progress=env.get_progress(),
             is_complete=env.is_complete,
-            message=f"Session recovered from backup (turn {env.state.current_turn})"
+            message=f"Session recovered from backup (turn {env.state.current_turn})",
+            conversation_history=extract_conversation_history(env),
+            name=env.interviewee.name
         )
     
     # Session not found
@@ -353,7 +377,9 @@ def recover_session(session_id: str):
         phase="unknown",
         progress={},
         is_complete=False,
-        message="Session not found or expired"
+        message="Session not found or expired",
+        conversation_history=[],
+        name=None
     )
 
 

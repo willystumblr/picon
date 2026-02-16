@@ -32,6 +32,11 @@ interface SessionData {
   name: string;
 }
 
+interface ConversationMessage {
+  question: string;
+  answer: string;
+}
+
 interface RecoverResponse {
   session_id: string;
   recovered: boolean;
@@ -40,6 +45,8 @@ interface RecoverResponse {
   progress: Progress;
   is_complete: boolean;
   message: string;
+  conversation_history: ConversationMessage[];
+  name: string | null;
 }
 
 // Helper function to detect URLs and render them as clickable links
@@ -110,28 +117,48 @@ export default function InterviewPage() {
                 currentQuestion: data.current_question,
                 phase: data.phase,
                 progress: data.progress,
-                name: '', // Not needed for recovery
+                name: data.name || '', // Use recovered name
               };
               
               setSessionData(recoveredSession);
               setProgress(data.progress);
               setIsComplete(data.is_complete);
               
-              // Show recovery message and current question
-              setMessages([
+              // Build message history from conversation_history
+              const recoveredMessages: Message[] = [
                 {
                   id: 'recovery',
                   type: 'system',
                   content: `🔄 Session recovered! ${data.message}`,
                   timestamp: new Date(),
                 },
-                {
-                  id: 'q-recovered',
+              ];
+              
+              // Add previous Q&A pairs
+              data.conversation_history.forEach((qa, index) => {
+                recoveredMessages.push({
+                  id: `q-history-${index}`,
                   type: 'system',
-                  content: data.current_question,
+                  content: qa.question,
                   timestamp: new Date(),
-                },
-              ]);
+                });
+                recoveredMessages.push({
+                  id: `a-history-${index}`,
+                  type: 'user',
+                  content: qa.answer,
+                  timestamp: new Date(),
+                });
+              });
+              
+              // Add current pending question
+              recoveredMessages.push({
+                id: 'q-recovered',
+                type: 'system',
+                content: data.current_question,
+                timestamp: new Date(),
+              });
+              
+              setMessages(recoveredMessages);
               
               setIsRecovering(false);
               return; // Don't fall through to normal init

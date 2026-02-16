@@ -10,17 +10,17 @@ import os
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+from datasets import load_dataset
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the interrogation environment.")
     # Model selection
-    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview', 'naive_human_simulacra', 'persona_hub', 'twin_2k_500', 'deeppersona'])
+    parser.add_argument('--baseline_name', type=str, required=True, help='Baseline name for the interviewee simulator.', choices=['characterai', 'human_simulacra', 'opencharacter', 'consistent_llm', 'human_interview', 'naive_human_simulacra', 'persona_hub', 'twin_2k_500', 'deeppersona', 'llm_generated'])
     parser.add_argument('--questioner_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the questioner.')
     parser.add_argument('--extractor_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the extractor.')
     parser.add_argument('--web_search_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the web search agent.')
     parser.add_argument('--evaluator_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the evaluator.')
-    parser.add_argument('--simulator_model', type=str, help='Simulator model name (opencharacter & consistent_llm).')
+    parser.add_argument('--simulator_model', type=str, help='Simulator model name (opencharacter, consistent_llm, llm_generated).')
     parser.add_argument('--nhd_model', type=str, default="gemini/gemini-2.5-flash", help='Model name for the NH detector in the interviewee simulator.')
     # Port settings
     parser.add_argument('--questioner_port', type=int, default=None, help='Port number for the questioner agent server.')
@@ -53,6 +53,7 @@ def parse_args():
     parser.add_argument('--output_dir', type=str, default='data/results', help='Directory to save the results.')
     parser.add_argument('--temp_output_dir', type=str, default='data/temp_results', help='Directory to save temporary results in case of errors.')
     parser.add_argument('--question_file_path', type=str, default='src/env/wvs_orthogonal_questions.json', help='Path to the pre-defined questions file.')
+    parser.add_argument('--eval_factors', type=str, nargs='+', default=None, choices=['internal', 'external', 'intra', 'inter'], help='Evaluation factors to compute. If not specified, all factors are evaluated.')
     
     return parser.parse_args()
 
@@ -119,9 +120,9 @@ def main(args, interviewee_kwarg):
     results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
     write_json(results_complete, result_path)
     # Inter-session evaluation
-    # eval_result = env.evaluate(histories)
-    # results_complete["evaluation"] = eval_result
-    # write_json(results_complete, result_path)
+    eval_result = env.evaluate(histories, eval_factors=args.eval_factors)
+    results_complete["evaluation"] = eval_result
+    write_json(results_complete, result_path)
     logging.info(f"Saved results to {result_path}.")
 
 if __name__ == "__main__":
@@ -230,7 +231,7 @@ if __name__ == "__main__":
             "question_seed": args.question_seed
         }]
     elif args.baseline_name == "twin_2k_500":
-        from datasets import load_dataset
+        
         dataset = load_dataset("LLM-Digital-Twin/Twin-2K-500", "full_persona", split="data")
         if args.do_sample:
             dataset = dataset.shuffle(seed=args.seed).select(range(10))
@@ -264,9 +265,67 @@ if __name__ == "__main__":
                 "port": args.simulator_port,
                 "simulator_host": args.simulator_host,
             })
-    
+    elif args.baseline_name == "llm_generated":
+        dataset = load_dataset("Tianyi-Lab/Personas", split="train")
+        if args.do_sample:
+            sample_size = min(10, len(dataset))
+            dataset = dataset.shuffle(seed=args.seed).select(range(sample_size))
+
+        # Tianyi-Lab/Personas stores persona text in model-specific columns.
+        preferred_prefixes = [
+            "Llama-3.1-70B-Instruct",
+            # "Qwen2.5-72B-Instruct",
+            # "Athene-70B",
+            # "Mixtral-8x7B-Instruct-v0.1",
+            # "Nemotron-70B-Instruct",
+            # "Llama-3.1-8B-Instruct",
+        ]
+        available_prefixes = [
+            col[: -len("_descriptive_persona")]
+            for col in dataset.column_names
+            if col.endswith("_descriptive_persona")
+        ]
+
+        selected_prefix = None
+        for prefix in preferred_prefixes:
+            if prefix in available_prefixes:
+                selected_prefix = prefix
+                break
+        if selected_prefix is None and available_prefixes:
+            selected_prefix = available_prefixes[0]
+        if selected_prefix is None:
+            raise ValueError(
+                "No persona columns found in Tianyi-Lab/Personas. "
+                "Expected *_descriptive_persona columns."
+            )
+
+        logging.info(f"Using persona columns from: {selected_prefix}")
+        for data in dataset:
+            persona_number = data.get("persona_number")
+            persona = {
+                "meta_persona": data.get("meta_persona", ""),
+                "descriptive_persona": data.get(f"{selected_prefix}_descriptive_persona", ""),
+                "objective_table_persona": data.get(f"{selected_prefix}_objective_table_persona", ""),
+                "subjective_table_persona": data.get(f"{selected_prefix}_subjective_table_persona", ""),
+            }
+            interviewee_kwargs.append({
+                "baseline_name": "llm_generated",
+                "simulator_model": args.simulator_model,
+                "persona": persona,
+                "name": f"LLM-Persona-{persona_number}" if persona_number is not None else "LLM-Persona-unknown",
+                "nhd_model": args.nhd_model,
+                "question_seed": args.question_seed,
+                "port": args.simulator_port,
+                "simulator_host": args.simulator_host,
+            })
+
     else:
-        raise ValueError("Invalid baseline name. Choose from ['characterai', 'human_simulacra', 'opencharacter', 'human_interview', 'twin_2k_500', 'consistent_llm', 'persona_hub']")
+        raise ValueError(
+            "Invalid baseline name. Choose from "
+            "['characterai', 'human_simulacra', 'naive_human_simulacra', "
+            "'opencharacter', 'consistent_llm', 'human_interview', "
+            "'persona_hub', 'twin_2k_500', 'deeppersona', 'llm_generated']"
+        )
     
     proceed_list = []
     for interviewee_kwarg in interviewee_kwargs:

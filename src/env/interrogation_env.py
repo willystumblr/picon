@@ -310,10 +310,10 @@ class InterrogationEnv:
             asyncio.run(self.interviewee.close())
         return self.state
     
-    def evaluate(self, histories: List[List[Turn]] = None) -> Dict[str, Any]:
+    def evaluate(self, histories: List[List[Turn]] = None, eval_factors: List[str] = None) -> Dict[str, Any]:
         """evaluate the entire interrogation session"""
         """use threading to parallelize the four evaluation tasks at once"""
-        eval_action = self.agents['evaluator'].act(histories=histories)
+        eval_action = self.agents['evaluator'].act(histories=histories, eval_factors=eval_factors)
         assert eval_action.action_type == "respond", "Evaluator must respond with evaluation."
         assert isinstance(eval_action.content, dict), "Evaluator response must be a dict."
         ### log the evaluation results key by key

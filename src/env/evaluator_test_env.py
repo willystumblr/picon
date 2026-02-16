@@ -22,6 +22,7 @@ class EvaluatorTestEnv:
         self.model = model
         self.host = kwargs.get('host', None)
         self.port = kwargs.get('port', None)
+        self.eval_factors = kwargs.get('eval_factors', None)  # ['internal', 'external', 'intra', 'inter'] or None for all
         self.start_time = time.time()
         self.env_cost = 0.0
         self.interview_path = interview_path if isinstance(interview_path, str) else "provided as dict"
@@ -88,9 +89,11 @@ class EvaluatorTestEnv:
     def step(self):
         """Run evaluation using evaluator.act()"""
         logging.info(f"[EVALUATOR] Running evaluation with {self.num_sessions} session(s)...")
+        if self.eval_factors:
+            logging.info(f"[EVALUATOR] Evaluating factors: {self.eval_factors}")
         
-        # Call evaluator.act() with histories
-        eval_action = self.evaluator.act(histories=self.histories)
+        # Call evaluator.act() with histories and eval_factors
+        eval_action = self.evaluator.act(histories=self.histories, eval_factors=self.eval_factors)
         
         assert eval_action.action_type == "respond", "Evaluator must respond with evaluation."
         assert isinstance(eval_action.content, dict), "Evaluator response must be a dict."
@@ -166,6 +169,8 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default=None, help="Evaluator api base url")
     parser.add_argument("--port", type=int, default=None, help="Port for model API if needed")
     parser.add_argument("--output_dir", type=str, default="data/evaluation", help="Directory to save evaluation results")
+    parser.add_argument("--eval_factors", type=str, nargs='+', default=None, choices=['internal', 'external', 'intra', 'inter'], help='Evaluation factors to compute. If not specified, all factors are evaluated.')
+    
     args = parser.parse_args()
     
     curr_time = time.strftime("%Y%m%d_%H%M%S")
@@ -174,7 +179,8 @@ if __name__ == "__main__":
         model=args.model,
         interview_path=args.interview_path,
         port=args.port,
-        host=args.host
+        host=args.host,
+        eval_factors=args.eval_factors
     )
     state = env.reset()
     env.step()

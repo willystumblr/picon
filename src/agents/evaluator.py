@@ -353,7 +353,7 @@ Determine which label best fits."""
         """Extract search result output from tool output."""
         return tool_output.output if tool_output.output else ""
 
-    def consistency_eval(self, history: List[Turn]):
+    def consistency_eval(self, history: List[Turn], eval_internal: bool = True, eval_external: bool = True):
         """
         Evaluate consistency using history directly instead of evaluator's memory.
 
@@ -364,7 +364,14 @@ Determine which label best fits."""
         4. External check: For each confirmed search result, compare main QA + claims + confirmation QA + search result
            - If not confirmed → 'inconclusive'
            - If confirmed → 'conflict' or 'plausible'
+        
+        Args:
+            history: List of turns to evaluate
+            eval_internal: Whether to evaluate internal consistency (uncooperative + internal)
+            eval_external: Whether to evaluate external consistency (affirmative + fact verification)
         """
+        if not eval_internal and not eval_external:
+            return  # nothing to evaluate
         # Filter out repeat turns
         non_repeat_turns = [turn for turn in history if turn.type != 'repeat']
 
@@ -456,186 +463,200 @@ Determine which label best fits."""
         if not eval_items:
             return  # nothing to evaluate
 
-        # Step 1: Check uncooperative for ALL items
-        qa_pairs = [{
-            "question": item['question'],
-            "response": item['response'],
-            # "log_prompt": (i < 3)
-        } for i, item in enumerate(eval_items)]
-
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            uncooperative_results = list(tqdm(executor.map(self.__generate_uncooperative_check, qa_pairs),
-                                              total=len(qa_pairs),
-                                              desc="Uncooperative check"))
-
-        # Step 2: Check affirmative for confirmation questions in external_eval_items
-        confirmation_qa_pairs = [{
-            "question": item['confirmation_question'],
-            "response": item['confirmation_response'],
-            # "log_prompt": (i < 3)
-        } for i, item in enumerate(external_eval_items)]
-
-        affirmative_results = []
-        if confirmation_qa_pairs:
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                affirmative_results = list(tqdm(executor.map(self.__generate_affirmative_check, confirmation_qa_pairs),
-                                                total=len(confirmation_qa_pairs),
-                                                desc="Affirmative check"))
-
-        # Store uncooperative results and compute ratios
-        cooperative_count = 0
-        total_count = len(eval_items)
-
-        for item, uncoop_result in zip(eval_items, uncooperative_results):
-            if uncoop_result.is_uncooperative:
-                self.results_dict['internal']['uncooperative']['count'] += 1
-                self.results_dict['internal']['uncooperative']['details'].append({
-                    'turn_index': item['turn_idx'],
-                    'question': item['question'],
-                    'response': item['response'],
-                    'rationale': uncoop_result.rationale,
-                    'uncooperative_type': uncoop_result.uncooperative_type
-                })
-            else:
-                cooperative_count += 1
-
-        responsive_ratio = cooperative_count / total_count if total_count > 0 else 0.0
-        # coverage = 
-        # Step 3: Process affirmative results and prepare per-claim fact verification
-        # For non-affirmed → 'not_confirmed', for affirmed → verify each claim individually
-        affirmed_items = []  # Items where interviewee confirmed the search result
-        affirmative_count = 0
-        total_confirmation_count = len(external_eval_items)
-
-        for ext_item, aff_result in zip(external_eval_items, affirmative_results):
-            if aff_result.is_affirmative:
-                affirmative_count += 1
-                affirmed_items.append(ext_item)
-                # Save affirmed search result
-                self.affirmed_search_results.append(ext_item['tool_output_str'])
-            else:
-                # Non-affirmed → not_confirmed (skip per-claim evaluation)
-                self.results_dict['external']['not_confirmed']['count'] += 1
-                self.results_dict['external']['not_confirmed']['details'].append({
-                    'turn_index': ext_item['turn_idx'],
-                    'main_question': ext_item['main_question'],
-                    'main_response': ext_item['main_response'],
-                    'confirmation_question': ext_item['confirmation_question'],
-                    'confirmation_response': ext_item['confirmation_response'],
-                    'rationale': aff_result.rationale
-                })
-
-        affirmative_ratio = affirmative_count / total_confirmation_count if total_confirmation_count > 0 else 0.0
-
-        # Step 4: Internal consistency check (need at least 2 items for previous context)
-        # Internal check: skip first item as it has no prior context
-        if len(eval_items) >= 2:
-            consistency_eval_items = eval_items[1:]  # only evaluate regular questions for internal consistency
-            consistency_uncoop_results = uncooperative_results[1:]
-
-            # Internal consistency check for all items (from 2nd item)
-            def generate_internal_wrapper(args):
-                item, idx = args
-                return self.__generate_internal_consistency_verdict(item['qa_history'], item['question'], item['response'])
-
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                internal_results = list(tqdm(executor.map(generate_internal_wrapper, [(item, idx) for idx, item in enumerate(consistency_eval_items)]),
-                                            total=len(consistency_eval_items),
-                                            desc="Internal consistency check"))
-
-            # Process internal consistency results
-            for item, uncoop_result, internal_verdict in zip(consistency_eval_items, consistency_uncoop_results, internal_results):
-                turn_idx = item['turn_idx']
-                question = item['question']
-                user_response = item['response']
-
-                if internal_verdict.verdict == 'conflict':
-                    self.results_dict['internal']['conflict']['count'] += 1
-                    self.results_dict['internal']['conflict']['details'].append({
-                        'turn_index': turn_idx,
-                        'question': question,
-                        'response': user_response,
-                        'rationale': internal_verdict.rationale,
-                        'is_cooperative': not uncoop_result.is_uncooperative
-                    })
-                elif internal_verdict.verdict == 'plausible':
-                    self.results_dict['internal']['plausible']['count'] += 1
-                    self.results_dict['internal']['plausible']['details'].append({
-                        'turn_index': turn_idx,
-                        'question': question,
-                        'response': user_response,
-                        'rationale': internal_verdict.rationale,
-                        'is_cooperative': not uncoop_result.is_uncooperative
-                    })
-
-        # Step 5: Per-claim fact verification for affirmed items
-        # For each confirmed search result, verify each claim individually
-        if affirmed_items:
-            # Flatten all claims from affirmed items for parallel processing
-            claim_verification_tasks = []
-            for item in affirmed_items:
-                claims = item['claims']
-                if not claims:
-                    # If no claims, skip this item
-                    continue
-                for claim in claims:
-                    claim_verification_tasks.append({
-                        'claim': claim,
-                        'search_result': item['search_result'],
-                        'main_question': item['main_question'],
-                        'main_response': item['main_response'],
-                        'turn_idx': item['turn_idx'],
-                        'entity': item.get('entity', 'unknown')
-                    })
-
-            if claim_verification_tasks:
-                def generate_fact_verification_wrapper(args):
-                    task, idx = args
-                    return self.__generate_fact_verification(
-                        claim=task['claim'],
-                        search_result=task['search_result'],
-                        main_question=task['main_question'],
-                        main_response=task['main_response'],
-                        # log_prompt=(idx < 3)
-                    )
-
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    fact_verification_results = list(tqdm(
-                        executor.map(generate_fact_verification_wrapper,
-                                    [(task, idx) for idx, task in enumerate(claim_verification_tasks)]),
-                        total=len(claim_verification_tasks),
-                        desc="Per-claim fact verification"))
-
-                # Process fact verification results
-                for task, fv_result in zip(claim_verification_tasks, fact_verification_results):
-                    label = fv_result.label
-                    detail = {
-                        'turn_index': task['turn_idx'],
-                        'claim': task['claim'],
-                        'main_question': task['main_question'],
-                        'main_response': task['main_response'],
-                        'search_result': task['search_result'],
-                        'rationale': fv_result.rationale
-                    }
-
-                    self.results_dict['external']['claims'][label]['count'] += 1
-                    self.results_dict['external']['claims'][label]['details'].append(detail)
-
-        # Calculate final scores
-        # Internal: based on all internal consistency checks
-        internal_plausible_ratio = (self.results_dict['internal']['plausible']['count'] /
-                                   (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count'])) if (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count']) > 0 else 0.0
-
-        # External: Wilson Score Lower Bound over all claims (supported + refuted + nei)
-        supported_count = self.results_dict['external']['claims']['supported']['count']
-        refuted_count = self.results_dict['external']['claims']['refuted']['count']
-        nei_count = self.results_dict['external']['claims']['nei']['count']
-        total_claim_count = supported_count + refuted_count + nei_count
+        # ============================================================
+        # INTERNAL EVALUATION PART (Uncooperative & Internal Consistency)
+        # ============================================================
         
-        self._calculate_final_scores(responsive_ratio, internal_plausible_ratio, supported_count, total_claim_count)
+        responsive_ratio = 0.0
+        internal_plausible_ratio = 0.0
+        
+        if eval_internal:
+            # Step 1: Check uncooperative for all main questions
+            qa_pairs = [{
+                "question": item['question'],
+                "response": item['response'],
+                # "log_prompt": (i < 3)
+            } for i, item in enumerate(eval_items)]
 
-        # Save affirmed search results to final output
-        self.results_dict['confirmed_search_results'] = self.affirmed_search_results
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                uncooperative_results = list(tqdm(executor.map(self.__generate_uncooperative_check, qa_pairs),
+                                                  total=len(qa_pairs),
+                                                  desc="Uncooperative check"))
+
+            # Store uncooperative results and compute ratios
+            cooperative_count = 0
+            total_count = len(eval_items)
+
+            for item, uncoop_result in zip(eval_items, uncooperative_results):
+                if uncoop_result.is_uncooperative:
+                    self.results_dict['internal']['uncooperative']['count'] += 1
+                    self.results_dict['internal']['uncooperative']['details'].append({
+                        'turn_index': item['turn_idx'],
+                        'question': item['question'],
+                        'response': item['response'],
+                        'rationale': uncoop_result.rationale,
+                        'uncooperative_type': uncoop_result.uncooperative_type
+                    })
+                else:
+                    cooperative_count += 1
+
+            responsive_ratio = cooperative_count / total_count if total_count > 0 else 0.0
+
+            # Step 2: Internal consistency check (need at least 2 items for previous context)
+            # Internal check: skip first item as it has no prior context
+            if len(eval_items) >= 2:
+                consistency_eval_items = eval_items[1:]  # only evaluate regular questions for internal consistency
+                consistency_uncoop_results = uncooperative_results[1:]
+
+                # Internal consistency check for all items (from 2nd item)
+                def generate_internal_wrapper(args):
+                    item, idx = args
+                    return self.__generate_internal_consistency_verdict(item['qa_history'], item['question'], item['response'])
+
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    internal_results = list(tqdm(executor.map(generate_internal_wrapper, [(item, idx) for idx, item in enumerate(consistency_eval_items)]),
+                                                total=len(consistency_eval_items),
+                                                desc="Internal consistency check"))
+
+                # Process internal consistency results
+                for item, uncoop_result, internal_verdict in zip(consistency_eval_items, consistency_uncoop_results, internal_results):
+                    turn_idx = item['turn_idx']
+                    question = item['question']
+                    user_response = item['response']
+
+                    if internal_verdict.verdict == 'conflict':
+                        self.results_dict['internal']['conflict']['count'] += 1
+                        self.results_dict['internal']['conflict']['details'].append({
+                            'turn_index': turn_idx,
+                            'question': question,
+                            'response': user_response,
+                            'rationale': internal_verdict.rationale,
+                            'is_cooperative': not uncoop_result.is_uncooperative
+                        })
+                    elif internal_verdict.verdict == 'plausible':
+                        self.results_dict['internal']['plausible']['count'] += 1
+                        self.results_dict['internal']['plausible']['details'].append({
+                            'turn_index': turn_idx,
+                            'question': question,
+                            'response': user_response,
+                            'rationale': internal_verdict.rationale,
+                            'is_cooperative': not uncoop_result.is_uncooperative
+                        })
+
+            # Calculate internal plausible ratio
+            internal_plausible_ratio = (self.results_dict['internal']['plausible']['count'] /
+                                       (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count'])) if (self.results_dict['internal']['conflict']['count'] + self.results_dict['internal']['plausible']['count']) > 0 else 0.0
+
+            self._calculate_internal_scores(responsive_ratio, internal_plausible_ratio)
+
+        # ============================================================
+        # EXTERNAL EVALUATION PART (Affirmative & Fact Verification)
+        # ============================================================
+        
+        if eval_external:
+            # Step 3: Check affirmative for confirmation questions in external_eval_items
+            confirmation_qa_pairs = [{
+                "question": item['confirmation_question'],
+                "response": item['confirmation_response'],
+                # "log_prompt": (i < 3)
+            } for i, item in enumerate(external_eval_items)]
+
+            affirmative_results = []
+            if confirmation_qa_pairs:
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    affirmative_results = list(tqdm(executor.map(self.__generate_affirmative_check, confirmation_qa_pairs),
+                                                    total=len(confirmation_qa_pairs),
+                                                    desc="Affirmative check"))
+
+            # Step 4: Process affirmative results and prepare per-claim fact verification
+            # For non-affirmed → 'not_confirmed', for affirmed → verify each claim individually
+            affirmed_items = []  # Items where interviewee confirmed the search result
+            affirmative_count = 0
+            total_confirmation_count = len(external_eval_items)
+
+            for ext_item, aff_result in zip(external_eval_items, affirmative_results):
+                if aff_result.is_affirmative:
+                    affirmative_count += 1
+                    affirmed_items.append(ext_item)
+                    # Save affirmed search result
+                    self.affirmed_search_results.append(ext_item['tool_output_str'])
+                else:
+                    # Non-affirmed → not_confirmed (skip per-claim evaluation)
+                    self.results_dict['external']['not_confirmed']['count'] += 1
+                    self.results_dict['external']['not_confirmed']['details'].append({
+                        'turn_index': ext_item['turn_idx'],
+                        'main_question': ext_item['main_question'],
+                        'main_response': ext_item['main_response'],
+                        'confirmation_question': ext_item['confirmation_question'],
+                        'confirmation_response': ext_item['confirmation_response'],
+                        'rationale': aff_result.rationale
+                    })
+
+            affirmative_ratio = affirmative_count / total_confirmation_count if total_confirmation_count > 0 else 0.0
+
+            # Step 5: Per-claim fact verification for affirmed items
+            # For each confirmed search result, verify each claim individually
+            if affirmed_items:
+                # Flatten all claims from affirmed items for parallel processing
+                claim_verification_tasks = []
+                for item in affirmed_items:
+                    claims = item['claims']
+                    if not claims:
+                        # If no claims, skip this item
+                        continue
+                    for claim in claims:
+                        claim_verification_tasks.append({
+                            'claim': claim,
+                            'search_result': item['search_result'],
+                            'main_question': item['main_question'],
+                            'main_response': item['main_response'],
+                            'turn_idx': item['turn_idx'],
+                            'entity': item.get('entity', 'unknown')
+                        })
+
+                if claim_verification_tasks:
+                    def generate_fact_verification_wrapper(args):
+                        task, idx = args
+                        return self.__generate_fact_verification(
+                            claim=task['claim'],
+                            search_result=task['search_result'],
+                            main_question=task['main_question'],
+                            main_response=task['main_response'],
+                            # log_prompt=(idx < 3)
+                        )
+
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        fact_verification_results = list(tqdm(
+                            executor.map(generate_fact_verification_wrapper,
+                                        [(task, idx) for idx, task in enumerate(claim_verification_tasks)]),
+                            total=len(claim_verification_tasks),
+                            desc="Per-claim fact verification"))
+
+                    # Process fact verification results
+                    for task, fv_result in zip(claim_verification_tasks, fact_verification_results):
+                        label = fv_result.label
+                        detail = {
+                            'turn_index': task['turn_idx'],
+                            'claim': task['claim'],
+                            'main_question': task['main_question'],
+                            'main_response': task['main_response'],
+                            'search_result': task['search_result'],
+                            'rationale': fv_result.rationale
+                        }
+
+                        self.results_dict['external']['claims'][label]['count'] += 1
+                        self.results_dict['external']['claims'][label]['details'].append(detail)
+
+            # Calculate external scores
+            supported_count = self.results_dict['external']['claims']['supported']['count']
+            refuted_count = self.results_dict['external']['claims']['refuted']['count']
+            nei_count = self.results_dict['external']['claims']['nei']['count']
+            total_claim_count = supported_count + refuted_count + nei_count
+            
+            self._calculate_external_scores(supported_count, total_claim_count)
+
+            # Save affirmed search results to final output
+            self.results_dict['confirmed_search_results'] = self.affirmed_search_results
     
     @staticmethod
     def wilson_score_lower_bound(success_count: int, total_count: int, confidence: float = 0.95) -> float:
@@ -659,8 +680,8 @@ Determine which label best fits."""
 
         return numerator / denominator
 
-    def _calculate_final_scores(self, responsive_ratio: float, internal_plausible_ratio: float, supported_count: int, total_claim_count: int):
-        """Calculate and store final scores"""
+    def _calculate_internal_scores(self, responsive_ratio: float, internal_plausible_ratio: float):
+        """Calculate and store internal consistency scores"""
         # Internal score: harmonic mean of plausible ratio and responsive ratio
         if internal_plausible_ratio + responsive_ratio > 0:
             internal_score = 2 * internal_plausible_ratio * responsive_ratio / (internal_plausible_ratio + responsive_ratio)
@@ -669,7 +690,9 @@ Determine which label best fits."""
         self.results_dict['internal']['score']['harmonic_mean'] = internal_score
         self.results_dict['internal']['score']['responsiveness_score'] = responsive_ratio
         self.results_dict['internal']['score']['consistency_score'] = internal_plausible_ratio
-        
+
+    def _calculate_external_scores(self, supported_count: int, total_claim_count: int):
+        """Calculate and store external consistency scores"""
         # External score: Wilson Score Lower Bound
         external_score = self.wilson_score_lower_bound(supported_count, total_claim_count)
         self.results_dict['external']['score']['wilson_score'] = external_score
@@ -780,17 +803,42 @@ Determine which label best fits."""
             self.results_dict['stability']['inter_session']['score'] += (judge=='TRUE')
         self.results_dict['stability']['inter_session']['score'] = round(self.results_dict['stability']['inter_session']['score'] / num_turns, 4)
         
-    def act(self, histories: List[List[Turn]]) -> Action:
+    def act(self, histories: List[List[Turn]], eval_factors: List[str] = None) -> Action:
+        """
+        Perform evaluation based on selected factors.
+        
+        Args:
+            histories: List of history sessions to evaluate
+            eval_factors: List of evaluation factors to perform. 
+                         Options: ['internal', 'external', 'intra', 'inter']
+                         If None, all factors are evaluated.
+        """
         main_history = histories[0]
+        
+        # Default to all factors if not specified
+        if eval_factors is None:
+            eval_factors = ['internal', 'external', 'intra', 'inter']
+        
+        eval_internal = 'internal' in eval_factors
+        eval_external = 'external' in eval_factors
+        eval_intra = 'intra' in eval_factors
+        eval_inter = 'inter' in eval_factors
         
         # parallel execution of consistency, intra-session, inter-session evals
         start_time = time.time()
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = []
-            futures.append(executor.submit(self.consistency_eval, main_history))
-            futures.append(executor.submit(self.intra_session_eval, main_history))
-            if len(histories) > 1:
+            
+            # consistency_eval handles both internal and external
+            if eval_internal or eval_external:
+                futures.append(executor.submit(self.consistency_eval, main_history, eval_internal, eval_external))
+            
+            if eval_intra:
+                futures.append(executor.submit(self.intra_session_eval, main_history))
+            
+            if eval_inter and len(histories) > 1:
                 futures.append(executor.submit(self.inter_session_eval, histories))
+            
             for future in tqdm(futures, desc="Overall evaluation progress", total=len(futures)):
                 future.result()  # wait for all to complete
         end_time = time.time()

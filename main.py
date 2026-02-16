@@ -77,8 +77,27 @@ def run_session(args, env: InterrogationEnv, reset_only=False):
         return result, termination_status
 
 def main(args, interviewee_kwarg):
+    """Run interview sessions for a single persona and return stats for aggregation."""
     results_complete = {}
     result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+    
+    # Initialize stats for this persona
+    persona_stats = {
+        "name": interviewee_kwarg.get('name', 'unknown'),
+        "ai_detected": False,
+        "success": False,
+        "error_type": None,
+        "duration_min": 0.0,
+        "total_cost": 0.0,
+        "agents_cost": 0.0,
+        "interviewee_cost": 0.0,
+        "tool_costs": 0.0,
+        "num_interviewee_responses": 0,
+        "num_turns_completed": 0,
+        "num_tool_calls": 0,
+        "sessions_completed": 0,
+    }
+    
     tools = {
             "google_claim_search": GoogleClaimSearch(
                 api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
@@ -86,44 +105,91 @@ def main(args, interviewee_kwarg):
             ),
             "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
         }
-    env = InterrogationEnv(
-        agents = {
-            "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.questioner_model, port=args.questioner_port),
-            "extractor": get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.extractor_model, port=args.extractor_port),
-            "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.web_search_model, port=args.web_search_port),
-            "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.evaluator_model, port=args.evaluator_port),
-        },
-        tools=tools,
-        max_turns=args.num_turns,
-        question_path=args.question_file_path,
-        **interviewee_kwarg
-    )
     
-    reset_only = False
-    histories = []
-    for session_idx in range(args.num_sessions):
-        logging.info(f"Starting session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee_kwargs['name']}, baseline: {env.baseline_name}")
-        logging.info("Resetting environment for new session...")
-        env.reset(reset_only=reset_only)
-        if not reset_only:
-            done = False
-            while not done:
-                state, done = env.step()
-            state = env.finalize()
-        session_result = env.save_state()
-        # Use env.state.history instead of local state variable for reset_only sessions
-        histories.append(env.state.history)
-        results_complete[f"session_{session_idx+1}"] = session_result
-        logging.info(f"Completed session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
-        reset_only = True
-    
-    results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
-    write_json(results_complete, result_path)
-    # Inter-session evaluation
-    eval_result = env.evaluate(histories, eval_factors=args.eval_factors)
-    results_complete["evaluation"] = eval_result
-    write_json(results_complete, result_path)
-    logging.info(f"Saved results to {result_path}.")
+    try:
+        env = InterrogationEnv(
+            agents = {
+                "questioner": get_agent("questioner", args.questioner_prompt_path, model=args.questioner_model, port=args.questioner_port),
+                "extractor": get_agent("entity_extractor", args.entity_extractor_prompt_path, model=args.extractor_model, port=args.extractor_port),
+                "web_search": get_agent("web_search", args.web_search_prompt_path, model=args.web_search_model, port=args.web_search_port),
+                "evaluator": get_agent("evaluator", args.evaluator_prompt_path, model=args.evaluator_model, port=args.evaluator_port),
+            },
+            tools=tools,
+            max_turns=args.num_turns,
+            question_path=args.question_file_path,
+            **interviewee_kwarg
+        )
+        
+        reset_only = False
+        histories = []
+        for session_idx in range(args.num_sessions):
+            logging.info(f"Starting session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee_kwargs['name']}, baseline: {env.baseline_name}")
+            logging.info("Resetting environment for new session...")
+            env.reset(reset_only=reset_only)
+            if not reset_only:
+                done = False
+                while not done:
+                    state, done = env.step()
+                state = env.finalize()
+            session_result = env.save_state()
+            # Use env.state.history instead of local state variable for reset_only sessions
+            histories.append(env.state.history)
+            results_complete[f"session_{session_idx+1}"] = session_result
+            logging.info(f"Completed session {session_idx + 1}/{args.num_sessions} for interviewee: {env.interviewee.name}, baseline: {env.interviewee.type}")
+            persona_stats["sessions_completed"] += 1
+            reset_only = True
+        
+        results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
+        write_json(results_complete, result_path)
+        # Inter-session evaluation
+        eval_result = env.evaluate(histories, eval_factors=args.eval_factors)
+        results_complete["evaluation"] = eval_result
+        write_json(results_complete, result_path)
+        logging.info(f"Saved results to {result_path}.")
+        
+        # Collect stats from completed sessions
+        persona_stats["success"] = True
+        for session_key in [k for k in results_complete.keys() if k.startswith("session_")]:
+            session_data = results_complete[session_key]
+            # Parse duration (stored as "X.XXX min")
+            duration_str = session_data.get("duration", "0 min")
+            try:
+                persona_stats["duration_min"] += float(duration_str.replace(" min", ""))
+            except:
+                pass
+            # Costs
+            cost_data = session_data.get("cost", {})
+            persona_stats["total_cost"] += cost_data.get("total_cost", 0.0)
+            persona_stats["agents_cost"] += cost_data.get("agents_cost", 0.0)
+            persona_stats["interviewee_cost"] += cost_data.get("interviewee_cost", 0.0)
+            persona_stats["tool_costs"] += sum(cost_data.get("tool_costs", {}).values())
+            # Count interviewee responses and tool calls from history
+            history = session_data.get("history", [])
+            for turn in history:
+                for obs in turn.get("environment_observation", []):
+                    if obs.get("observation_type") == "interviewee_response":
+                        persona_stats["num_interviewee_responses"] += 1
+                    if obs.get("observation_type") == "tool_output":
+                        tool_outputs = obs.get("tool_output", [])
+                        persona_stats["num_tool_calls"] += len(tool_outputs) if tool_outputs else 0
+                # Count turns (main_interrogation type)
+                if turn.get("type") == "main_interrogation":
+                    persona_stats["num_turns_completed"] += 1
+        
+        return persona_stats
+        
+    except ValueError as e:
+        if "AI Detected" in str(e):
+            persona_stats["ai_detected"] = True
+            persona_stats["error_type"] = "AI Detected"
+            logging.warning(f"AI Detected for persona {persona_stats['name']}")
+        else:
+            persona_stats["error_type"] = str(e)
+        return persona_stats
+    except Exception as e:
+        persona_stats["error_type"] = str(e)
+        logging.exception(f"Error for persona {persona_stats['name']}: {e}")
+        return persona_stats
 
 if __name__ == "__main__":
     args = parse_args()
@@ -343,12 +409,115 @@ if __name__ == "__main__":
             else:
                 logging.info("Invalid input. Please enter Y or N.")
     
+    # Collect stats from all persona runs
+    all_persona_stats = []
+    run_start_time = time.time()
+    
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         futures = {executor.submit(main, args, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
         for future in as_completed(futures):
             interviewee_kwarg = futures[future]
             try:
-                future.result()
+                persona_stats = future.result()
+                if persona_stats:
+                    all_persona_stats.append(persona_stats)
             except Exception as e:
                 logging.exception(f"Unhandled exception for interviewee {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}: {e}")
+                # Still track failed personas
+                all_persona_stats.append({
+                    "name": interviewee_kwarg.get('name', 'unknown'),
+                    "ai_detected": False,
+                    "success": False,
+                    "error_type": str(e),
+                    "duration_min": 0.0,
+                    "total_cost": 0.0,
+                    "agents_cost": 0.0,
+                    "interviewee_cost": 0.0,
+                    "tool_costs": 0.0,
+                    "num_interviewee_responses": 0,
+                    "num_turns_completed": 0,
+                    "num_tool_calls": 0,
+                    "sessions_completed": 0,
+                })
+    
+    # Aggregate baseline statistics
+    total_personas = len(all_persona_stats)
+    if total_personas > 0:
+        ai_detected_count = sum(1 for s in all_persona_stats if s.get("ai_detected", False))
+        success_count = sum(1 for s in all_persona_stats if s.get("success", False))
+        total_duration = sum(s.get("duration_min", 0.0) for s in all_persona_stats)
+        total_cost = sum(s.get("total_cost", 0.0) for s in all_persona_stats)
+        total_agents_cost = sum(s.get("agents_cost", 0.0) for s in all_persona_stats)
+        total_interviewee_cost = sum(s.get("interviewee_cost", 0.0) for s in all_persona_stats)
+        total_tool_costs = sum(s.get("tool_costs", 0.0) for s in all_persona_stats)
+        total_responses = sum(s.get("num_interviewee_responses", 0) for s in all_persona_stats)
+        total_turns = sum(s.get("num_turns_completed", 0) for s in all_persona_stats)
+        total_tool_calls = sum(s.get("num_tool_calls", 0) for s in all_persona_stats)
+        total_sessions = sum(s.get("sessions_completed", 0) for s in all_persona_stats)
+        
+        baseline_summary = {
+            "baseline_name": args.baseline_name,
+            "run_timestamp": time.strftime('%Y-%m-%d_%H-%M-%S'),
+            "run_duration_min": (time.time() - run_start_time) / 60,
+            "config": {
+                "questioner_model": args.questioner_model,
+                "extractor_model": args.extractor_model,
+                "web_search_model": args.web_search_model,
+                "evaluator_model": args.evaluator_model,
+                "simulator_model": args.simulator_model,
+                "nhd_model": args.nhd_model,
+                "num_turns": args.num_turns,
+                "num_sessions": args.num_sessions,
+            },
+            "persona_counts": {
+                "total": total_personas,
+                "success": success_count,
+                "failed": total_personas - success_count,
+                "ai_detected": ai_detected_count,
+            },
+            "ai_detection_rate": ai_detected_count / total_personas,
+            "success_rate": success_count / total_personas,
+            "duration": {
+                "total_min": total_duration,
+                "avg_per_persona_min": total_duration / total_personas,
+            },
+            "costs": {
+                "total": total_cost,
+                "avg_per_persona": total_cost / total_personas,
+                "breakdown": {
+                    "agents_total": total_agents_cost,
+                    "interviewee_total": total_interviewee_cost,
+                    "tools_total": total_tool_costs,
+                },
+            },
+            "interactions": {
+                "total_interviewee_responses": total_responses,
+                "avg_responses_per_persona": total_responses / total_personas,
+                "total_turns_completed": total_turns,
+                "avg_turns_per_persona": total_turns / total_personas,
+                "total_tool_calls": total_tool_calls,
+                "avg_tool_calls_per_persona": total_tool_calls / total_personas,
+                "total_sessions_completed": total_sessions,
+            },
+            "per_persona_details": all_persona_stats,
+        }
+        
+        # Save baseline summary with timestamp
+        summary_path = f"{args.output_dir}/{args.baseline_name}/baseline_summary_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+        os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+        write_json(baseline_summary, summary_path)
+        
+        # Log summary
+        logging.info("="*60)
+        logging.info(f"BASELINE SUMMARY: {args.baseline_name}")
+        logging.info("="*60)
+        logging.info(f"Total personas: {total_personas}")
+        logging.info(f"Success: {success_count} ({success_count/total_personas*100:.1f}%)")
+        logging.info(f"AI Detected: {ai_detected_count} ({ai_detected_count/total_personas*100:.1f}%)")
+        logging.info(f"Avg duration per persona: {total_duration/total_personas:.2f} min")
+        logging.info(f"Avg interviewee responses: {total_responses/total_personas:.1f}")
+        logging.info(f"Total cost: ${total_cost:.4f} (avg ${total_cost/total_personas:.4f}/persona)")
+        logging.info(f"Summary saved to: {summary_path}")
+        logging.info("="*60)
+    
     logging.info("All sessions completed.")

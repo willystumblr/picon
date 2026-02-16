@@ -173,10 +173,24 @@ class RecoverResponse(BaseModel):
     name: Optional[str] = None
 
 
-def extract_conversation_history(env: WebInterrogationEnv) -> list[dict]:
-    """Extract Q&A pairs from environment state history."""
+def extract_conversation_history(env: WebInterrogationEnv, exclude_incomplete_turn: bool = True) -> list[dict]:
+    """
+    Extract Q&A pairs from environment state history.
+    
+    Args:
+        env: The interview environment
+        exclude_incomplete_turn: If True and there are pending confirmations,
+            exclude the last turn since it's incomplete (user needs to re-answer)
+    """
     history = []
-    for turn in env.state.history:
+    turns_to_process = env.state.history
+    
+    # If there are pending confirmations, the current turn is incomplete
+    # Exclude it so user doesn't see duplicate Q&A
+    if exclude_incomplete_turn and env.pending_confirmations:
+        turns_to_process = env.state.history[:-1] if env.state.history else []
+    
+    for turn in turns_to_process:
         # Each turn has environment_observation which may contain interviewee responses
         for obs in turn.environment_observation:
             if obs.observation_type == "interviewee_response" and obs.response:

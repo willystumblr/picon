@@ -37,7 +37,7 @@ class OpenCharacterSimulator(BaseIntervieweeSimulator):
         self.simulator_model = kwargs['simulator_model']
         self.host = kwargs.get('simulator_host', 'localhost')
         self.port = kwargs['port']
-        self.max_tokens = self.__get_max_token()
+        self.max_tokens = self.get_max_token()
         
     def _get_response(self, message: str) -> IntervieweeResponse:
         self.history.append({

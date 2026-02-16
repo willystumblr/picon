@@ -30,7 +30,7 @@ class DeepPersonaSimulator(BaseIntervieweeSimulator):
         self.name = kwargs.get('name', 'whatchamacallit')
         self.host = kwargs.get('simulator_host', None)
         self.port = kwargs.get('port', None)
-        self.max_tokens = get_max_tokens(self.client_or_model)
+        self.max_tokens = self.get_max_token()
 
     def _get_response(self, message: str) -> IntervieweeResponse:
         self.history.append({
@@ -40,14 +40,14 @@ class DeepPersonaSimulator(BaseIntervieweeSimulator):
         self._truncate_history()
 
         completion_kwargs = {
-            "model": self.simulator_model,
+            "model": self.client_or_model,
             "messages": self.history,
             "reasoning_effort": "low",
         }
         if self.host and self.port:
             completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
         res = get_completion(**completion_kwargs)
-        
+        self.cost += completion_cost(res) if not self.client_or_model.startswith("hosted_vllm/") else 0.0
         response = res.choices[0].message.content.strip()
         self.history.append({
             "role": "assistant",

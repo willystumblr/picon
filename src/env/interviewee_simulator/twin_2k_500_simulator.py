@@ -28,6 +28,7 @@ class Twin2K500Simulator(BaseIntervieweeSimulator):
         self.simulator_model = kwargs['simulator_model']
         self.host = kwargs.get('simulator_host', None)
         self.port = kwargs.get('port', None)
+        self.max_tokens = self.get_max_token()
         
     def _get_response(self, message: str) -> IntervieweeResponse:
         self.history.append({

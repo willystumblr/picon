@@ -43,7 +43,7 @@ class BaseIntervieweeSimulator:
     ##                                                                      ##
     ##########################################################################
 
-    def __get_max_token(self):
+    def get_max_token(self):
         if self.client_or_model.startswith("hosted_vllm/"):
             from transformers import AutoTokenizer
             tokenizer = AutoTokenizer.from_pretrained(self.client_or_model[len("hosted_vllm/"):])

@@ -19,3 +19,4 @@ requests
 rank-bm25
 PyGithub
 pdfplumber
+redis

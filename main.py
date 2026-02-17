@@ -77,8 +77,8 @@ def run_session(args, env: InterrogationEnv, reset_only=False):
         result = env.save_state(termination_status=termination_status)
         return result, termination_status
 
-def main(args, interviewee_kwarg):
-    """Run interview sessions for a single persona and return stats for aggregation."""
+def run_interview(args, interviewee_kwarg):
+    """Run interview sessions for a single persona (NO evaluation). Returns data needed for later evaluation."""
     results_complete = {}
     result_path = f"{args.output_dir}/{args.baseline_name}/{interviewee_kwarg.get('name', 'unknown').replace(' ', '_')}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
     
@@ -150,32 +150,7 @@ def main(args, interviewee_kwarg):
         results_complete["agents_memory"] = {agent_name: agent.memory for agent_name, agent in env.agents.items()}
         write_json(results_complete, result_path)
         
-        # Inter-session evaluation (only if --do_eval is set)
-        if args.do_eval:
-            eval_result = env.evaluate(histories, eval_factors=args.eval_factors)
-            results_complete["evaluation"] = eval_result
-            write_json(results_complete, result_path)
-            
-            # Extract evaluation scores for aggregation
-            if eval_result:
-                internal = eval_result.get("internal", {})
-                external = eval_result.get("external", {})
-                stability = eval_result.get("stability", {})
-                
-                internal_score = internal.get("score", {})
-                persona_stats["eval_internal_harmonic_mean"] = internal_score.get("harmonic_mean")
-                persona_stats["eval_internal_responsiveness"] = internal_score.get("responsiveness_score")
-                persona_stats["eval_internal_consistency"] = internal_score.get("consistency_score")
-                
-                external_score = external.get("score", {})
-                persona_stats["eval_external_wilson"] = external_score.get("wilson_score")
-                
-                inter_session = stability.get("inter_session", {})
-                intra_session = stability.get("intra_session", {})
-                persona_stats["eval_stability_inter_session"] = inter_session.get("score")
-                persona_stats["eval_stability_intra_session"] = intra_session.get("score")
-        
-        logging.info(f"Saved results to {result_path}.")
+        logging.info(f"Saved interview results to {result_path}.")
         
         # Collect stats from completed sessions
         persona_stats["success"] = True
@@ -206,24 +181,75 @@ def main(args, interviewee_kwarg):
                 if turn.get("type") == "main_interrogation":
                     persona_stats["num_turns_completed"] += 1
         
-        return persona_stats
+        # Return data needed for evaluation
+        return {
+            "persona_stats": persona_stats,
+            "result_path": result_path,
+            "results_complete": results_complete,
+            "histories": histories,
+            "env": env,  # Keep env for evaluation
+        }
         
     except ValueError as e:
         if "AI Detected" in str(e):
             persona_stats["ai_detected"] = True
             persona_stats["error_type"] = "AI Detected"
-            # For AI detected cases, inter-session score should be 0.0
             persona_stats["eval_stability_inter_session"] = 0.0
             logging.warning(f"AI Detected for persona {persona_stats['name']}")
         else:
             persona_stats["error_type"] = str(e)
-        return persona_stats
+        return {"persona_stats": persona_stats, "result_path": None, "results_complete": None, "histories": None, "env": None}
     except Exception as e:
         persona_stats["error_type"] = str(e)
-        # For failed cases, inter-session score should be 0.0
         persona_stats["eval_stability_inter_session"] = 0.0
         logging.exception(f"Error for persona {persona_stats['name']}: {e}")
-        return persona_stats
+        return {"persona_stats": persona_stats, "result_path": None, "results_complete": None, "histories": None, "env": None}
+
+
+def run_evaluation(interview_result, args):
+    """Run evaluation for a single persona's interview results (called SEQUENTIALLY after all interviews)."""
+    if interview_result["env"] is None or interview_result["histories"] is None:
+        logging.info(f"Skipping evaluation for {interview_result['persona_stats']['name']} - interview failed or AI detected")
+        return interview_result["persona_stats"]
+    
+    persona_stats = interview_result["persona_stats"]
+    result_path = interview_result["result_path"]
+    results_complete = interview_result["results_complete"]
+    histories = interview_result["histories"]
+    env = interview_result["env"]
+    
+    try:
+        logging.info(f"Running evaluation for {persona_stats['name']}...")
+        eval_result = env.evaluate(histories, eval_factors=args.eval_factors)
+        results_complete["evaluation"] = eval_result
+        write_json(results_complete, result_path)
+        
+        # Extract evaluation scores for aggregation
+        if eval_result:
+            internal = eval_result.get("internal", {})
+            external = eval_result.get("external", {})
+            stability = eval_result.get("stability", {})
+            
+            internal_score = internal.get("score", {})
+            persona_stats["eval_internal_harmonic_mean"] = internal_score.get("harmonic_mean")
+            persona_stats["eval_internal_responsiveness"] = internal_score.get("responsiveness_score")
+            persona_stats["eval_internal_consistency"] = internal_score.get("consistency_score")
+            
+            external_score = external.get("score", {})
+            persona_stats["eval_external_wilson"] = external_score.get("wilson_score")
+            
+            inter_session = stability.get("inter_session", {})
+            intra_session = stability.get("intra_session", {})
+            persona_stats["eval_stability_inter_session"] = inter_session.get("score")
+            persona_stats["eval_stability_intra_session"] = intra_session.get("score")
+        
+        logging.info(f"Evaluation completed for {persona_stats['name']}")
+        
+    except Exception as e:
+        logging.exception(f"Evaluation failed for {persona_stats['name']}: {e}")
+        persona_stats["eval_stability_inter_session"] = 0.0
+    
+    return persona_stats
 
 if __name__ == "__main__":
     args = parse_args()
@@ -446,43 +472,70 @@ if __name__ == "__main__":
             else:
                 logging.info("Invalid input. Please enter Y or N.")
     
-    # Collect stats from all persona runs
+    # PHASE 1: Run all interviews in PARALLEL
+    all_interview_results = []
     all_persona_stats = []
     run_start_time = time.time()
     
+    logging.info("="*60)
+    logging.info("PHASE 1: Running interviews in parallel")
+    logging.info("="*60)
+    
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        futures = {executor.submit(main, args, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
+        futures = {executor.submit(run_interview, args, interviewee_kwarg): interviewee_kwarg for interviewee_kwarg in proceed_list}
         for future in as_completed(futures):
             interviewee_kwarg = futures[future]
             try:
-                persona_stats = future.result()
-                if persona_stats:
-                    all_persona_stats.append(persona_stats)
+                interview_result = future.result()
+                if interview_result:
+                    all_interview_results.append(interview_result)
             except Exception as e:
                 logging.exception(f"Unhandled exception for interviewee {interviewee_kwarg.get('name', 'unknown')}, baseline: {interviewee_kwarg['baseline_name']}: {e}")
                 # Still track failed personas
-                all_persona_stats.append({
-                    "name": interviewee_kwarg.get('name', 'unknown'),
-                    "ai_detected": False,
-                    "success": False,
-                    "error_type": str(e),
-                    "duration_min": 0.0,
-                    "total_cost": 0.0,
-                    "agents_cost": 0.0,
-                    "interviewee_cost": 0.0,
-                    "tool_costs": 0.0,
-                    "num_interviewee_responses": 0,
-                    "num_turns_completed": 0,
-                    "num_tool_calls": 0,
-                    "sessions_completed": 0,
-                    # Failed personas get 0.0 for inter-session
-                    "eval_internal_harmonic_mean": None,
-                    "eval_internal_responsiveness": None,
-                    "eval_internal_consistency": None,
-                    "eval_external_wilson": None,
-                    "eval_stability_inter_session": 0.0,
-                    "eval_stability_intra_session": None,
+                all_interview_results.append({
+                    "persona_stats": {
+                        "name": interviewee_kwarg.get('name', 'unknown'),
+                        "ai_detected": False,
+                        "success": False,
+                        "error_type": str(e),
+                        "duration_min": 0.0,
+                        "total_cost": 0.0,
+                        "agents_cost": 0.0,
+                        "interviewee_cost": 0.0,
+                        "tool_costs": 0.0,
+                        "num_interviewee_responses": 0,
+                        "num_turns_completed": 0,
+                        "num_tool_calls": 0,
+                        "sessions_completed": 0,
+                        "eval_internal_harmonic_mean": None,
+                        "eval_internal_responsiveness": None,
+                        "eval_internal_consistency": None,
+                        "eval_external_wilson": None,
+                        "eval_stability_inter_session": 0.0,
+                        "eval_stability_intra_session": None,
+                    },
+                    "result_path": None,
+                    "results_complete": None,
+                    "histories": None,
+                    "env": None,
                 })
+    
+    logging.info(f"All {len(all_interview_results)} interviews completed.")
+    
+    # PHASE 2: Run evaluations SEQUENTIALLY (if --do_eval is set)
+    if args.do_eval:
+        logging.info("="*60)
+        logging.info("PHASE 2: Running evaluations sequentially")
+        logging.info("="*60)
+        
+        for i, interview_result in enumerate(all_interview_results):
+            name = interview_result["persona_stats"]["name"]
+            logging.info(f"Evaluating {i+1}/{len(all_interview_results)}: {name}")
+            persona_stats = run_evaluation(interview_result, args)
+            all_persona_stats.append(persona_stats)
+    else:
+        # No evaluation - just collect persona_stats from interview results
+        all_persona_stats = [r["persona_stats"] for r in all_interview_results]
     
     # Aggregate baseline statistics
     total_personas = len(all_persona_stats)

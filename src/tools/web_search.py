@@ -196,7 +196,7 @@ class GoogleClaimSearch(BaseModel):
             return {"title": "", "error": f"[Error fetching] {e}"}
     
     # ------------- tool entry point -------------
-    def invoke_single(self, claim: str, q: str, gl: str, exactTerms: None) -> str:
+    def invoke_single(self, claim: str, q: str, gl: str) -> str:
         """
         Parameters
         ----------
@@ -222,8 +222,6 @@ class GoogleClaimSearch(BaseModel):
                 "num": TOP_K_RESULTS, # top 5 results
                 "gl": gl,             # geolocation
             }
-            if exactTerms:
-                q_params["exactTerms"] = exactTerms
             resp = requests.get(search_url, params=q_params, timeout=6)
             resp.raise_for_status()
             self.tool_call_counts += 1
@@ -287,7 +285,7 @@ class GoogleClaimSearch(BaseModel):
             return json.dumps(results, ensure_ascii=False)
 
         except Exception as outer:
-            return json.dumps([{"query" : q, "exactTerms": "", "title": "", "link":"", "gl" : gl, "text_block":f"Search failure: {outer}"}], ensure_ascii=False)
+            return json.dumps([{"query" : q, "title": "", "link":"", "gl" : gl, "text_block":f"Search failure: {outer}"}], ensure_ascii=False)
 
     # ------------- schema that LiteLLM exports -------------
     @staticmethod
@@ -297,7 +295,7 @@ class GoogleClaimSearch(BaseModel):
             "function": {
                 "name": "google_claim_search",
                 "description": (
-                    "Given a factual `claim`, run Google Custom Search with the query (keyword) `q`, `gl`, and `exactTerms` (optional), "
+                    "Given a factual `claim`, run Google Custom Search with the query (keyword) `q`, and `gl`."
                     f"crawl search result pages (trying up to {TOP_K_RESULTS} URLs with fallback on failure), "
                     "and return extracted plain texts as a JSON string."
                 ),
@@ -312,17 +310,13 @@ class GoogleClaimSearch(BaseModel):
                             "type": "string",
                             "description": "Geolocation of end user. The country code (e.g., 'us', 'uk', 'ca', 'jp', 'kr') to tailor search results to a specific region.",
                         },
-                        "exactTerms": {
-                            "type": "string",
-                            "description": "Exact terms to match in the search results for fact verification. Do not include quotation marks."
-                        },
                     },
-                    "required": ["q", "gl", "exactTerms", ],
+                    "required": ["q", "gl"],
                 },
             },
         }
         
-    def invoke(self, claims: List[str], q: str, gl: str, exactTerms: str = None) -> str:
+    def invoke(self, claims: List[str], q: str, gl: str) -> str:
         """
         Process multiple claims with the same query and geolocation.
         
@@ -350,7 +344,6 @@ class GoogleClaimSearch(BaseModel):
                 "cx": self.cx,
                 "num": TOP_K_RESULTS,
                 "gl": gl,
-                "exactTerms": exactTerms if exactTerms else "",
             }
             resp = requests.get(search_url, params=q_params, timeout=6)
             resp.raise_for_status()

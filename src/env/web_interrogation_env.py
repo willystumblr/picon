@@ -92,6 +92,7 @@ class WebInterrogationEnv:
         self.cutoff_date = time.strftime("%B %d, %Y")
         self.start_time = None
         self.env_cost = 0.0
+        self._executor = ThreadPoolExecutor(max_workers=4)
 
         self.agents['questioner'].set_cutoff_date(self.cutoff_date)
         self.agents['web_search'].set_cutoff_date(self.cutoff_date)
@@ -461,23 +462,21 @@ class WebInterrogationEnv:
                 })
             
             # Web search
-            with ThreadPoolExecutor(max_workers=len(list_of_extractions)) as executor:
-                web_search_actions = list(executor.map(
-                    self.agents['web_search'].act, 
-                    list_of_extractions, 
-                    [history] * len(list_of_extractions)
-                ))
-            
+            web_search_actions = list(self._executor.map(
+                self.agents['web_search'].act,
+                list_of_extractions,
+                [history] * len(list_of_extractions)
+            ))
+
             filtered_actions = []
             filtered_actions_indices = []
             for i, action in enumerate(web_search_actions):
                 if action and action.action_type == "tool_call":
                     filtered_actions.append(action)
                     filtered_actions_indices.append(i)
-            
+
             if filtered_actions:
-                with ThreadPoolExecutor(max_workers=len(filtered_actions)) as executor:
-                    tool_outputs = list(executor.map(self.invoke_tool, filtered_actions))
+                tool_outputs = list(self._executor.map(self.invoke_tool, filtered_actions))
                 
                 observations.append(Observation(
                     observation_type="tool_output",

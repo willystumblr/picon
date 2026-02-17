@@ -198,11 +198,14 @@ def run_interview(args, interviewee_kwarg):
             logging.warning(f"AI Detected for persona {persona_stats['name']}")
         else:
             persona_stats["error_type"] = str(e)
+        env.shutdown()
         return {"persona_stats": persona_stats, "result_path": None, "results_complete": None, "histories": None, "env": None}
     except Exception as e:
         persona_stats["error_type"] = str(e)
         persona_stats["eval_stability_inter_session"] = 0.0
         logging.exception(f"Error for persona {persona_stats['name']}: {e}")
+        if 'env' in locals():
+            env.shutdown()
         return {"persona_stats": persona_stats, "result_path": None, "results_complete": None, "histories": None, "env": None}
 
 
@@ -248,7 +251,9 @@ def run_evaluation(interview_result, args):
     except Exception as e:
         logging.exception(f"Evaluation failed for {persona_stats['name']}: {e}")
         persona_stats["eval_stability_inter_session"] = 0.0
-    
+    finally:
+        env.shutdown()
+
     return persona_stats
 
 if __name__ == "__main__":
@@ -331,14 +336,13 @@ if __name__ == "__main__":
         if args.do_sample:
             dataset = dataset.shuffle(seed=args.seed).select(range(10))
         # if args.do_sample:
-        #     import random
-        #     random.seed(args.seed)
-        #     dataset = random.sample(dataset, k=10)
-        
-        for id, data in enumerate(dataset):
-            #breakpoint()
-            #data['persona'] = data['persona'][0].lower() + data['persona'][1:] if len(data['persona']) > 1 else data['persona'].lower()
-            data['name'] = f"PersonaHub-{id}"
+        #     dataset = dataset.shuffle(seed=args.seed).select(range(10))
+        if args.do_sample:
+            import random
+            random.seed(args.seed)
+            dataset = random.sample(dataset, k=10)
+        for data in dataset:
+            data['persona'] = data['persona'][0].lower() + data['persona'][1:] if len(data['persona']) > 1 else data['persona'].lower()
             interviewee_kwargs.append({
                 "baseline_name": "persona_hub",
                 "persona": data['persona'],

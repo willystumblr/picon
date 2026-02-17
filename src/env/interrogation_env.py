@@ -13,6 +13,7 @@ from litellm.cost_calculator import completion_cost
 import os
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 import random
 import asyncio
 import litellm
@@ -67,6 +68,7 @@ class InterrogationEnv:
             self.instruction = open(instruction_path).read()
             self.confirmation_prompt = open(f"{project_root}/src/agents/prompts/confirmation_prompt.txt").read()
             self.env_cost = 0.0
+            self._executor = ThreadPoolExecutor(max_workers=4)
 
             self.cutoff_date = time.strftime("%B %d, %Y")
             self.agents['questioner'].set_cutoff_date(self.cutoff_date)
@@ -76,6 +78,11 @@ class InterrogationEnv:
         else:
             self.cutoff_date = result_data['session_1']["interview_date"]
             self.agents['evaluator'].set_cutoff_date(self.cutoff_date)
+
+    def shutdown(self):
+        """Shut down the shared thread pool."""
+        if hasattr(self, '_executor'):
+            self._executor.shutdown(wait=False)
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -176,18 +183,16 @@ class InterrogationEnv:
                     "answer": qa_pair.content
                 })
             # 2. Web Search (optional)
-            with ThreadPoolExecutor(max_workers=len(list_of_extractions)) as executor:
-                web_search_actions = list(executor.map(self.agents['web_search'].act, list_of_extractions, [history]*len(list_of_extractions)))
+            web_search_actions = list(self._executor.map(self.agents['web_search'].act, list_of_extractions, [history]*len(list_of_extractions)))
             filtered_actions = []
             filtered_actions_indices = []
-            for i, action in enumerate(web_search_actions): 
+            for i, action in enumerate(web_search_actions):
                 if action and action.action_type == "tool_call":
                     filtered_actions.append(action)
                     filtered_actions_indices.append(i)
 
             if filtered_actions:
-                with ThreadPoolExecutor(max_workers=len(filtered_actions)) as executor:
-                    tool_outputs = list(executor.map(self.invoke_tool, filtered_actions))
+                tool_outputs = list(self._executor.map(self.invoke_tool, filtered_actions))
 
                 observations.append(Observation(
                     observation_type="tool_output",
@@ -226,6 +231,7 @@ class InterrogationEnv:
                         model=self.agents['questioner'].model,
                         messages=messages,
                         reasoning_effort="low",
+                        timeout=60
                     )
                     if self.agents['questioner'].model.startswith("hosted_vllm/"):
                         assert self.agents['questioner'].port is not None, "Port must be specified for hosted_vllm models."    
@@ -233,10 +239,15 @@ class InterrogationEnv:
                     if self.agents['questioner'].model.startswith("claude-"):
                         completion_kwargs.pop('reasoning_effort') # claude does not support reasoning_effort
                         completion_kwargs['tools']=[] # dummy tools to avoid tool usage
-                    while True:
+                    max_confirmation_retries = 5
+                    for _conf_attempt in range(max_confirmation_retries):
                         res = get_completion(**completion_kwargs)
                         if res and res.choices and res.choices[0].message and res.choices[0].message.content:
                             break
+                        logging.warning(f"Empty confirmation response (attempt {_conf_attempt + 1}/{max_confirmation_retries})")
+                    else:
+                        logging.warning(f"Failed to get confirmation response after {max_confirmation_retries} attempts. Skipping confirmation.")
+                        continue
                     self.env_cost += completion_cost(res) if not self.agents['questioner'].model.startswith("hosted_vllm/") else 0.0
                     confirmation_question = res.choices[0].message.content.strip()
                     if "SKIP" not in confirmation_question:

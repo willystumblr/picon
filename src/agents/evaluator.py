@@ -72,6 +72,7 @@ class EvaluatorAgent(Agent):
             "- Be strict: only classify as 'supported' if there is clear supporting evidence, and 'refuted' only if there is clear contradicting evidence."
         )
         self.affirmed_search_results = []  # Store affirmed search results for external consistency check
+        self._executor = ThreadPoolExecutor(max_workers=4)
         self.results_dict = {
             'internal': {
                 'score': {
@@ -132,17 +133,16 @@ class EvaluatorAgent(Agent):
     def set_cutoff_date(self, cutoff_date: str) -> None:
         self.memory[0]['content'] = self.memory[0]['content'].format(cutoff_date=cutoff_date)
 
-    def _run_tasks(self, func, items, max_workers: int = 4, desc: str = "Processing"):
+    def _run_tasks(self, func, items, desc: str = "Processing"):
         """Run tasks either in parallel or sequentially based on threading context.
-        
+
         When called from within a thread pool (nested threading), runs sequentially
-        to prevent deadlocks. Otherwise uses ThreadPoolExecutor for parallelism.
+        to prevent deadlocks. Otherwise uses the shared ThreadPoolExecutor for parallelism.
         """
         should_use_threading = self.use_internal_threading and not is_in_thread_context()
-        
+
         if should_use_threading and len(items) > 1:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                return list(tqdm(executor.map(func, items), total=len(items), desc=desc))
+            return list(tqdm(self._executor.map(func, items), total=len(items), desc=desc))
         else:
             # Sequential execution - safer when in nested thread context
             return [func(item) for item in tqdm(items, desc=f"{desc} (sequential)")]
@@ -511,7 +511,6 @@ Determine which label best fits."""
             uncooperative_results = self._run_tasks(
                 self.__generate_uncooperative_check,
                 qa_pairs,
-                max_workers=4,
                 desc="Uncooperative check"
             )
 
@@ -547,9 +546,8 @@ Determine which label best fits."""
 
                 internal_items = [(item, idx) for idx, item in enumerate(consistency_eval_items)]
                 internal_results = self._run_tasks(
-                    generate_internal_wrapper, 
-                    internal_items, 
-                    max_workers=2, 
+                    generate_internal_wrapper,
+                    internal_items,
                     desc="Internal consistency check"
                 )
 
@@ -601,7 +599,6 @@ Determine which label best fits."""
                 affirmative_results = self._run_tasks(
                     self.__generate_affirmative_check,
                     confirmation_qa_pairs,
-                    max_workers=4,
                     desc="Affirmative check"
                 )
 
@@ -666,7 +663,6 @@ Determine which label best fits."""
                     fact_verification_results = self._run_tasks(
                         generate_fact_verification_wrapper,
                         verification_items,
-                        max_workers=4,
                         desc="Per-claim fact verification"
                     )
 
@@ -767,7 +763,6 @@ Determine which label best fits."""
         results = self._run_tasks(
             _get_completion_wrapper,
             completion_kwargs_list,
-            max_workers=4,
             desc="Intra-session evaluation"
         )
         
@@ -775,14 +770,23 @@ Determine which label best fits."""
             self._calculate_cost(res) if not self.model.startswith("hosted_vllm/") else 0.0
             judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
             if judge is None:
-                breakpoint()
+                logging.warning(f"Intra-session eval: received None response for question {i}. Defaulting to TRUE.")
+                judge = "TRUE"
             if '</think>' in judge:
                 judge = judge.split('</think>')[-1].strip()
-            while judge not in ["TRUE", "FALSE"]:
-                logging.warning(f"Unexpected response for repeat score: {judge}. Retrying...")
+            max_judge_retries = 5
+            for _judge_attempt in range(max_judge_retries):
+                if judge in ["TRUE", "FALSE"]:
+                    break
+                logging.warning(f"Unexpected response for repeat score (attempt {_judge_attempt + 1}/{max_judge_retries}): {judge}. Retrying...")
                 res = get_completion(**completion_kwargs_list[i])
                 self._calculate_cost(res)
                 judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+                if judge and '</think>' in judge:
+                    judge = judge.split('</think>')[-1].strip()
+            else:
+                logging.warning(f"Intra-session eval: failed to get TRUE/FALSE after {max_judge_retries} attempts. Defaulting to TRUE.")
+                judge = "TRUE"  # default to TRUE to avoid penalizing for evaluation instability
             self.results_dict['stability']['intra_session']['details'].append({
                 "question": f"Just to clarify, {get_to_knows[i].environment_observation[0].response.question}",
                 "original_response": get_to_knows[i].environment_observation[0].response.content,
@@ -831,18 +835,27 @@ Determine which label best fits."""
         results = self._run_tasks(
             _get_completion_wrapper,
             completion_kwargs_list,
-            max_workers=4,
             desc="Inter-session evaluation"
         )
         
         for i, res in enumerate(results):
             self._calculate_cost(res)
             judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
-            while judge not in ["TRUE", "FALSE"]:
-                logging.warning(f"Unexpected response for inter-session repeat score: {judge}. Retrying...")
+            if judge and '</think>' in judge:
+                judge = judge.split('</think>')[-1].strip()
+            max_judge_retries = 5
+            for _judge_attempt in range(max_judge_retries):
+                if judge in ["TRUE", "FALSE"]:
+                    break
+                logging.warning(f"Unexpected response for inter-session repeat score (attempt {_judge_attempt + 1}/{max_judge_retries}): {judge}. Retrying...")
                 res = get_completion(**completion_kwargs_list[i])
                 self._calculate_cost(res)
                 judge = res.choices[0].message.content.strip() if res and res.choices and res.choices[0].message and res.choices[0].message.content else None
+                if judge and '</think>' in judge:
+                    judge = judge.split('</think>')[-1].strip()
+            else:
+                logging.warning(f"Inter-session eval: failed to get TRUE/FALSE after {max_judge_retries} attempts. Defaulting to FALSE.")
+                judge = "FALSE"
             self.results_dict['stability']['inter_session']['details'].append({
                 "question": all_get_to_knows[0][i].environment_observation[0].response.question,
                 "responses": [turn.environment_observation[0].response.content for turn in [all_get_to_knows[sess_idx][i] for sess_idx in range(len(all_get_to_knows))]],
@@ -885,10 +898,9 @@ Determine which label best fits."""
             tasks.append(('inter', lambda: self.inter_session_eval(histories)))
         
         if should_use_threading and len(tasks) > 1:
-            with ThreadPoolExecutor(max_workers=3) as executor:
-                futures = [executor.submit(task[1]) for task in tasks]
-                for future in tqdm(futures, desc="Overall evaluation progress", total=len(futures)):
-                    future.result()  # wait for all to complete
+            futures = [self._executor.submit(task[1]) for task in tasks]
+            for future in tqdm(futures, desc="Overall evaluation progress", total=len(futures)):
+                future.result()  # wait for all to complete
         else:
             # Sequential execution - safer when in nested thread context
             for name, task in tqdm(tasks, desc="Overall evaluation progress (sequential)"):

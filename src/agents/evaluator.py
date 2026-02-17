@@ -8,6 +8,7 @@ import litellm
 import os
 import json
 import time
+import threading
 from src.agents.base_agent import Agent
 from src.utils import get_completion
 from src.schemas import Action, Observation, Turn, ToolOutput
@@ -15,6 +16,18 @@ from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
 litellm.drop_params = True
+
+# Thread-safe flag to detect if we're running in a nested thread context
+_IN_THREAD_CONTEXT = threading.local()
+
+
+def set_thread_context(in_thread: bool):
+    """Set whether we're running inside a thread pool (to avoid nested threading deadlocks)."""
+    _IN_THREAD_CONTEXT.value = in_thread
+
+def is_in_thread_context() -> bool:
+    """Check if we're running inside a thread pool."""
+    return getattr(_IN_THREAD_CONTEXT, 'value', False)
 
 
 class EvaluatorAgent(Agent):
@@ -26,6 +39,8 @@ class EvaluatorAgent(Agent):
             port=kwargs.get('port', None),
             host=kwargs.get('host', 'localhost')
         )
+        # Allow disabling internal threading to prevent deadlocks when called from threaded context
+        self.use_internal_threading = kwargs.get('use_internal_threading', True)
         current_dir = os.path.dirname(os.path.abspath(__file__)) 
         self.REPEAT_PROMPT = ("You will be given a single question and two corresponding answers. Determine whether the two answers are essentially the same in meaning. "
                               "If they are, output TRUE. If they are not, output FALSE. "
@@ -116,6 +131,21 @@ class EvaluatorAgent(Agent):
 
     def set_cutoff_date(self, cutoff_date: str) -> None:
         self.memory[0]['content'] = self.memory[0]['content'].format(cutoff_date=cutoff_date)
+
+    def _run_tasks(self, func, items, max_workers: int = 4, desc: str = "Processing"):
+        """Run tasks either in parallel or sequentially based on threading context.
+        
+        When called from within a thread pool (nested threading), runs sequentially
+        to prevent deadlocks. Otherwise uses ThreadPoolExecutor for parallelism.
+        """
+        should_use_threading = self.use_internal_threading and not is_in_thread_context()
+        
+        if should_use_threading and len(items) > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                return list(tqdm(executor.map(func, items), total=len(items), desc=desc))
+        else:
+            # Sequential execution - safer when in nested thread context
+            return [func(item) for item in tqdm(items, desc=f"{desc} (sequential)")]
 
     def update_memory(self, **kwargs) -> None:
         if kwargs.get('index') is not None:
@@ -478,10 +508,12 @@ Determine which label best fits."""
                 # "log_prompt": (i < 3)
             } for i, item in enumerate(eval_items)]
 
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                uncooperative_results = list(tqdm(executor.map(self.__generate_uncooperative_check, qa_pairs),
-                                                  total=len(qa_pairs),
-                                                  desc="Uncooperative check"))
+            uncooperative_results = self._run_tasks(
+                self.__generate_uncooperative_check,
+                qa_pairs,
+                max_workers=4,
+                desc="Uncooperative check"
+            )
 
             # Store uncooperative results and compute ratios
             cooperative_count = 0
@@ -513,10 +545,13 @@ Determine which label best fits."""
                     item, idx = args
                     return self.__generate_internal_consistency_verdict(item['qa_history'], item['question'], item['response'])
 
-                with ThreadPoolExecutor(max_workers=2) as executor:
-                    internal_results = list(tqdm(executor.map(generate_internal_wrapper, [(item, idx) for idx, item in enumerate(consistency_eval_items)]),
-                                                total=len(consistency_eval_items),
-                                                desc="Internal consistency check"))
+                internal_items = [(item, idx) for idx, item in enumerate(consistency_eval_items)]
+                internal_results = self._run_tasks(
+                    generate_internal_wrapper, 
+                    internal_items, 
+                    max_workers=2, 
+                    desc="Internal consistency check"
+                )
 
                 # Process internal consistency results
                 for item, uncoop_result, internal_verdict in zip(consistency_eval_items, consistency_uncoop_results, internal_results):
@@ -563,10 +598,12 @@ Determine which label best fits."""
 
             affirmative_results = []
             if confirmation_qa_pairs:
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    affirmative_results = list(tqdm(executor.map(self.__generate_affirmative_check, confirmation_qa_pairs),
-                                                    total=len(confirmation_qa_pairs),
-                                                    desc="Affirmative check"))
+                affirmative_results = self._run_tasks(
+                    self.__generate_affirmative_check,
+                    confirmation_qa_pairs,
+                    max_workers=4,
+                    desc="Affirmative check"
+                )
 
             # Step 4: Process affirmative results and prepare per-claim fact verification
             # For non-affirmed → 'not_confirmed', for affirmed → verify each claim individually
@@ -625,12 +662,13 @@ Determine which label best fits."""
                             # log_prompt=(idx < 3)
                         )
 
-                    with ThreadPoolExecutor(max_workers=4) as executor:
-                        fact_verification_results = list(tqdm(
-                            executor.map(generate_fact_verification_wrapper,
-                                        [(task, idx) for idx, task in enumerate(claim_verification_tasks)]),
-                            total=len(claim_verification_tasks),
-                            desc="Per-claim fact verification"))
+                    verification_items = [(task, idx) for idx, task in enumerate(claim_verification_tasks)]
+                    fact_verification_results = self._run_tasks(
+                        generate_fact_verification_wrapper,
+                        verification_items,
+                        max_workers=4,
+                        desc="Per-claim fact verification"
+                    )
 
                     # Process fact verification results
                     for task, fv_result in zip(claim_verification_tasks, fact_verification_results):
@@ -723,10 +761,15 @@ Determine which label best fits."""
                 completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
             completion_kwargs_list.append(completion_kwargs)
         
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(tqdm(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list),
-                               total=len(completion_kwargs_list),
-                               desc="Intra-session evaluation"))
+        def _get_completion_wrapper(kwargs):
+            return get_completion(**kwargs)
+        
+        results = self._run_tasks(
+            _get_completion_wrapper,
+            completion_kwargs_list,
+            max_workers=4,
+            desc="Intra-session evaluation"
+        )
         
         for i, res in enumerate(results):
             self._calculate_cost(res) if not self.model.startswith("hosted_vllm/") else 0.0
@@ -781,11 +824,16 @@ Determine which label best fits."""
                 assert self.port is not None, "Port must be specified for hosted_vllm models."    
                 completion_kwargs['api_base'] = f"http://{self.host}:{self.port}/v1"
             completion_kwargs_list.append(completion_kwargs)
+        
+        def _get_completion_wrapper(kwargs):
+            return get_completion(**kwargs)
             
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(tqdm(executor.map(lambda kwargs: get_completion(**kwargs), completion_kwargs_list),
-                               total=len(completion_kwargs_list),
-                               desc="Inter-session evaluation"))
+        results = self._run_tasks(
+            _get_completion_wrapper,
+            completion_kwargs_list,
+            max_workers=4,
+            desc="Inter-session evaluation"
+        )
         
         for i, res in enumerate(results):
             self._calculate_cost(res)
@@ -824,23 +872,28 @@ Determine which label best fits."""
         eval_intra = 'intra' in eval_factors
         eval_inter = 'inter' in eval_factors
         
-        # parallel execution of consistency, intra-session, inter-session evals
+        # Run evaluations - use threading only if not already in a thread context
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = []
-            
-            # consistency_eval handles both internal and external
-            if eval_internal or eval_external:
-                futures.append(executor.submit(self.consistency_eval, main_history, eval_internal, eval_external))
-            
-            if eval_intra:
-                futures.append(executor.submit(self.intra_session_eval, main_history))
-            
-            if eval_inter and len(histories) > 1:
-                futures.append(executor.submit(self.inter_session_eval, histories))
-            
-            for future in tqdm(futures, desc="Overall evaluation progress", total=len(futures)):
-                future.result()  # wait for all to complete
+        should_use_threading = self.use_internal_threading and not is_in_thread_context()
+        
+        tasks = []
+        if eval_internal or eval_external:
+            tasks.append(('consistency', lambda: self.consistency_eval(main_history, eval_internal, eval_external)))
+        if eval_intra:
+            tasks.append(('intra', lambda: self.intra_session_eval(main_history)))
+        if eval_inter and len(histories) > 1:
+            tasks.append(('inter', lambda: self.inter_session_eval(histories)))
+        
+        if should_use_threading and len(tasks) > 1:
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [executor.submit(task[1]) for task in tasks]
+                for future in tqdm(futures, desc="Overall evaluation progress", total=len(futures)):
+                    future.result()  # wait for all to complete
+        else:
+            # Sequential execution - safer when in nested thread context
+            for name, task in tqdm(tasks, desc="Overall evaluation progress (sequential)"):
+                task()
+        
         end_time = time.time()
         logging.info(f"Evaluation completed in {end_time - start_time:.2f} seconds.")
         

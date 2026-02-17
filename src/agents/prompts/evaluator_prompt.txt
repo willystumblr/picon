@@ -12,6 +12,7 @@ The provided interview was held on {cutoff_date}.
 Mark a turn as a **conflict** if and only if the **current response** triggers the issue:
 - The **current response** explicitly assigns a value to an attribute that is clearly incompatible with a previously stated value for the **same** attribute (e.g., "I am 30" vs "I am 40").
 - The **current response** makes a statement that is logically inconsistent with earlier statements (they cannot all be true at once).
+- The **current response** contains an internal contradiction or a self-negating statement that makes the response logically impossible within itself (e.g., "The city is not in Massachusetts, but it is in Massachusetts").
 
 # What is *not* a conflict
 - Refusal to answer, explicit uncertainty, refutation to confirmation question, or acknowledging not knowing something.

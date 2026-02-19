@@ -38,16 +38,20 @@ Generate tool calls for proper tools for each entity. When generating query, do 
 
 ### Additional Rule For Identifiers (Codes, Serials, Form Numbers)
 
-* If the entity is a specific alphanumeric string (e.g., `"798/71"`, `"Form 075"`), searching the string itself often fails.
-* Instead, verify the **format rules**.
-* Construct the query using the **Document Type** or **System Name** from the claim + words like `"format"`, `"structure"`, or `"syntax"`.
+* If the entity is a specific alphanumeric string (e.g., `"798/71"`, `"Form 075"`) or a full website address (`https://<SOME_DOMAIN>.com`), searching the string itself often fails.
+* Instead, 
+    * alphanumeric strings: verify the **format rules**. Construct the query using the **Document Type** or **System Name** from the claim + words like `"format"`, `"structure"`, or `"syntax"`.
+    * search the domain name and the base path (the last component) without its protocol. e.g., https://github.com/ => github
+
 
 #### Example
 
 * entity: `798/71`
-
 * claim: `"Birth registration numbers in Pretoria, South Africa, use a format containing a sequence of numbers followed by a slash and a two-digit year."`
-
 * query: `Pretoria birth registration number format`
+
+* entity: `https://github.com/google/BIG-bench` (URL)
+* claim: `"The Github repo of BIG-bench project is 'https://github.com/google/BIG-bench'."`
+* query: `github BIG-bench`
 
 * IMPORTANT: Never use external knowledge to construct a query. Just follow the guide.

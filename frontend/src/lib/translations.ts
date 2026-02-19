@@ -26,6 +26,10 @@ interface Translations {
     continueButton: string;
     errorName: string;
     errorStart: string;
+    existingSessionTitle: string;
+    existingSessionDescription: string;
+    continueSession: string;
+    startNewInterview: string;
   };
   consent: {
     title: string;
@@ -75,6 +79,10 @@ export const translations: Record<Language, Translations> = {
       continueButton: 'Continue to Consent',
       errorName: 'Please enter your name',
       errorStart: 'Failed to start interview. Please try again.',
+      existingSessionTitle: 'You have an ongoing interview',
+      existingSessionDescription: 'Your previous session is saved. Would you like to continue where you left off, or start a new interview?',
+      continueSession: 'Continue Interview',
+      startNewInterview: 'Start New Interview',
     },
     consent: {
       title: 'Informed Consent',
@@ -186,6 +194,10 @@ export const translations: Record<Language, Translations> = {
       continueButton: '동의서로 계속',
       errorName: '이름을 입력해 주세요',
       errorStart: '인터뷰 시작에 실패했습니다. 다시 시도해 주세요.',
+      existingSessionTitle: '진행 중인 인터뷰가 있습니다',
+      existingSessionDescription: '이전 세션이 저장되어 있습니다. 이어서 진행하시겠습니까, 아니면 새로운 인터뷰를 시작하시겠습니까?',
+      continueSession: '인터뷰 이어하기',
+      startNewInterview: '새 인터뷰 시작',
     },
     consent: {
       title: '사전 동의서',
@@ -216,14 +228,14 @@ export const translations: Record<Language, Translations> = {
           checkboxLabel: '진실하게 답변하거나 명확하게 거부 의사를 표현하겠습니다',
         },
         {
-          title: '기술적 요구사항',
-          description: '인터뷰 중에 페이지를 새로고침하거나 종료하지 마세요.',
+          title: '⚠️ 기술적 요구사항 (필독)',
+          description: '인터뷰 데이터 유실을 방지하기 위해 아래 내용을 반드시 지켜주세요.',
           details: [
-            '페이지를 새로고침하면 인터뷰 진행 상황이 손실됩니다',
-            '새로고침하면 처음부터 다시 시작해야 합니다',
-            '인터뷰가 완료될 때까지 이 브라우저 탭을 열어 두세요',
+            '**새로고침 금지**: 페이지를 새로고침하거나 창을 닫으면 진행 상황이 모두 사라져 처음부터 다시 시작해야 합니다.',
+            '**정보 검색 팁**: 정보 검색을 하실 때는 새 탭이나 스마트폰을 별도로 이용해 주세요.',
+            '**응답 타임아웃**: 장시간 동안 (1시간 이상) 응답이 없으면 서버 연결이 끊어집니다. 원활한 진행을 위해 1시간 정도를 비우시고 인터뷰를 한 번에 완료하시는 것을 추천 드립니다.',
           ],
-          checkboxLabel: '인터뷰 중에 페이지를 새로고침하거나 닫지 않아야 함을 이해했습니다',
+          checkboxLabel: '인터뷰 중 새로고침, 새로운 탭 이용, 응답 타임아웃과 관련된 주의사항을 이해했습니다',
         },
         {
           title: '인터뷰 구조',

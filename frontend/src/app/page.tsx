@@ -1,16 +1,21 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/hooks/useLanguage';
 import { Language } from '@/types/consent';
-import { setConsentState } from '@/lib/storage';
+import { setConsentState, getRecoverableSessionId, clearAllSessionData } from '@/lib/storage';
 
 export default function Home() {
   const router = useRouter();
   const { language, setLanguage, t } = useLanguage();
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [hasExistingSession, setHasExistingSession] = useState(false);
+
+  useEffect(() => {
+    setHasExistingSession(!!getRecoverableSessionId());
+  }, []);
 
   const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,7 +24,6 @@ export default function Home() {
       return;
     }
 
-    // Store name and language in consent state
     setConsentState({
       language,
       name: name.trim(),
@@ -28,9 +32,45 @@ export default function Home() {
       timestamp: new Date().toISOString(),
     });
 
-    // Navigate to consent flow
     router.push('/consent');
   };
+
+  const handleStartNew = () => {
+    clearAllSessionData();
+    setHasExistingSession(false);
+  };
+
+  if (hasExistingSession) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-gradient-to-b from-gray-50 to-gray-100">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
+          <h1 className="text-2xl font-bold text-center mb-6 text-gray-800">
+            {t.home.title}
+          </h1>
+
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-md">
+            <p className="font-medium text-amber-800 mb-1">{t.home.existingSessionTitle}</p>
+            <p className="text-sm text-amber-700">{t.home.existingSessionDescription}</p>
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => router.push('/interview')}
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition"
+            >
+              {t.home.continueSession}
+            </button>
+            <button
+              onClick={handleStartNew}
+              className="w-full bg-white text-gray-700 py-2 px-4 rounded-md border border-gray-300 hover:bg-gray-50 transition"
+            >
+              {t.home.startNewInterview}
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-gradient-to-b from-gray-50 to-gray-100">

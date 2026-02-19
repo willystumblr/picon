@@ -104,3 +104,14 @@ export function clearRecoverableSessionId(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(STORAGE_KEYS.RECOVERABLE_SESSION_ID);
 }
+
+/**
+ * Clear all session data to start fresh
+ */
+export function clearAllSessionData(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(STORAGE_KEYS.RECOVERABLE_SESSION_ID);
+  sessionStorage.removeItem(STORAGE_KEYS.CONSENT_STATE);
+  sessionStorage.removeItem(STORAGE_KEYS.INTERVIEW_SESSION);
+  sessionStorage.removeItem(STORAGE_KEYS.LANGUAGE_PREFERENCE);
+}

@@ -37,13 +37,21 @@ Generate tool calls for proper tools for each entity. When generating query, do 
 
 ---
 
+### Additional Rule For Email Addresses
+
+* If the entity is an **institutional email address** (e.g., `user@kaist.ac.kr`), do NOT search for the full address — it is not publicly findable.
+* Instead, search for the **institution's email domain** using the claim text, e.g.:
+  * entity: `someuser@kaist.ac.kr`, claim: `"KAIST uses the official email domain @kaist.ac.kr."` → query: `KAIST official email domain`
+
+---
+
 ### Additional Rule For Identifiers (Codes, Serials, Form Numbers, Web Address)
 
 * If the entity is a specific alphanumeric string (e.g., `"798/71"`, `"Form 075"`) or a full website address (`https://<SOME_DOMAIN>.com`), searching the string itself often fails.
 * Instead, 
     * alphanumeric strings: verify the **format rules**. Construct the query using the **Document Type** or **System Name** from the claim + words like `"format"`, `"structure"`, or `"syntax"`.
     * search the domain name and the base path (the last component) without its protocol. e.g., https://github.com/ => github
-
+* Exception: if the claim itself requests to verify the existence (e.g., "The entity 'some_alphanumeric_string' exists."), search the entity itself (query => `some_alphanumeric_string`)
 
 #### Example
 

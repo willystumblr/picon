@@ -47,7 +47,7 @@ Extract **ONLY**:
     WORK_OF_ART : Titles of books, songs, etc
     LAW : Named documents made into laws
     LANGUAGE : Any named language
-    EMAIL : Full email addresses
+    EMAIL : Institutional/custom domain email addresses ONLY (e.g., @kaist.ac.kr, @company.com). Do NOT extract emails from well-known personal providers (Gmail, Yahoo, Outlook, Hotmail, Naver[@naver.com is a personal provider], Daum, iCloud, etc.).
     URL : Websites, IPs, Domains
     PHONE : Phone numbers
     ID_NUM : Patent numbers, serial numbers, form codes, license plates, official document IDs (e.g., "ISO 9001", "Form 1040", "Patent US123456").
@@ -131,7 +131,7 @@ Only generate claims that:
 * Contain no vague or ambiguous entities
 
 ### Special Rule for IDENTIFIERS & CODES
-If the extracted entity is a numeric or alphanumeric code (e.g., a certificate number, form number):
+If the extracted entity is a numeric or alphanumeric identifier or code (e.g., a certificate number, registration number, etc.):
 1. **Do not** simply claim the number exists (e.g., avoid "Number 12345 exists").
 2. Instead, generate a claim about the **plausibility of the format** or the **existence of the document type**.
 
@@ -145,6 +145,18 @@ If the extracted entity is a numeric or alphanumeric code (e.g., a certificate n
   * *Entity:* "Form 075"
   * *Claim:* "Form 075 is a valid official document type within the context of [Conversation Topic]."
   *(This allows the verifier to search "Does Form 075 exist in immigration?")*
+
+### Special Rule for EMAIL
+If the extracted entity is an institutional/custom domain email address:
+1. **Do not** claim the specific address exists (e.g., avoid "The email address 'user@kaist.ac.kr' is a real email address.").
+2. Instead, generate a claim about the **institution's email domain**.
+
+**Example:**
+* *Input:* "My email is minseokim23@kaist.ac.kr."
+  * *Entity:* "minseokim23@kaist.ac.kr"
+  * *Claim:* "KAIST uses the official email domain @kaist.ac.kr."
+
+**Do NOT extract** emails from well-known personal providers (Gmail, Yahoo, Outlook, Hotmail, Naver, Daum, iCloud, etc.) — they provide no publicly verifiable information.
 
 ---
 

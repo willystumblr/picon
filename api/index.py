@@ -21,7 +21,7 @@ sys.path.insert(0, project_root)
 
 from src.env.web_interrogation_env import WebInterrogationEnv
 from src.agents.agent_factory import get_agent
-from src.tools.web_search import GoogleClaimSearch
+from src.tools.web_search import SerperSearch, TavilySearch
 from src.tools.address_locator import GoogleGeocodeValidate
 from src.utils import write_json, upload_to_github 
 
@@ -204,10 +204,8 @@ def extract_conversation_history(env: WebInterrogationEnv, exclude_incomplete_tu
 def create_env(name: str, question_seed: int = 42) -> WebInterrogationEnv:
     """Create a new WebInterrogationEnv with fixed parameters."""
     tools = {
-        "google_claim_search": GoogleClaimSearch(
-            api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
-            cx=os.getenv('GOOGLE_CX_ID'),
-        ),
+        "serper_search": SerperSearch(api_key=os.getenv('SERPER_API_KEY')),
+        # "tavily_search": TavilySearch(api_key=os.getenv('TAVILY_API_KEY')),
         "google_geocode_validate": GoogleGeocodeValidate(
             api_key=os.getenv('GOOGLE_GEOCODE')
         )

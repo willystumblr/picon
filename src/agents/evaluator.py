@@ -290,14 +290,19 @@ class EvaluatorAgent(Agent):
             label: Literal['supported', 'refuted', 'nei'] = Field(..., description="The fact verification label")
             rationale: str = Field(..., description="The rationale behind the verdict")
 
-        # PROGRAMMATIC CHECK: Detect "0 URLs" case - entity does not exist
-        NONEXISTENCE_INDICATOR = "Failed to extract text from all 0 URLs tried"
-        if NONEXISTENCE_INDICATOR in search_result:
+        # PROGRAMMATIC CHECK: Detect "no results" case - entity does not exist.
+        # SerperSearch/GoogleClaimSearch: "Failed to extract text from all 0 URLs tried"
+        # TavilySearch: "No results found." (when raw_results is empty)
+        NONEXISTENCE_INDICATORS = [
+            "Failed to extract text from all 0 URLs tried",
+            "No results found.",
+        ]
+        if any(indicator in search_result for indicator in NONEXISTENCE_INDICATORS):
             if log_prompt:
                 logging.info(f"[Fact Verification] Detected non-existence indicator. Auto-classifying as refuted.")
             return FactVerificationResponse(
                 label='refuted',
-                rationale=f"The search result contains '{NONEXISTENCE_INDICATOR}', indicating the entity does not exist in reality. The claim is therefore refuted."
+                rationale="The search result returned no content (entity does not exist or could not be found). The claim is therefore refuted."
             )
 
         user_content = f"""Claim to verify: {claim}
@@ -380,8 +385,33 @@ Determine which label best fits."""
         return []
 
     def _extract_search_result(self, tool_output: 'ToolOutput') -> str:
-        """Extract search result output from tool output."""
-        return tool_output.output if tool_output.output else ""
+        """Extract search result for fact verification.
+
+        Always combines text_block (crawled passages) with api_snippets so the
+        LLM has maximum evidence regardless of crawl success or failure.
+        """
+        raw = tool_output.output
+        if not raw:
+            return ""
+        try:
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list) or not parsed:
+                return raw
+            entry = parsed[0]
+            text_block = entry.get("text_block", [])
+            api_snippets = entry.get("api_snippets", [])
+
+            if api_snippets:
+                if isinstance(text_block, str):
+                    # text_block is a failure message string; replace with snippets
+                    entry["text_block"] = api_snippets
+                elif isinstance(text_block, list):
+                    # Always combine crawled passages with api_snippets (deduplicated)
+                    entry["text_block"] = list(dict.fromkeys(text_block + api_snippets))
+                return json.dumps(parsed, ensure_ascii=False)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+        return raw
 
     def consistency_eval(self, history: List[Turn], eval_internal: bool = True, eval_external: bool = True):
         """

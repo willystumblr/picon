@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 import requests
 from rank_bm25 import BM25Okapi
 import cloudscraper
+import logging
 
 TOP_K_RESULTS = 5         # how many search results to fetch (for fallback)
 MAX_SUCCESSFUL_PAGES = 1  # how many successfully fetched pages to return
@@ -424,3 +425,301 @@ class GoogleClaimSearch(BaseModel):
         billable_calls = max(0, self.tool_call_counts - free_quota)
         total_cost = (billable_calls / 1000) * cost_per_1000
         return total_cost
+
+
+class SerperSearch(BaseModel):
+    """
+    LiteLLM-compatible tool:
+    given a claim, return plain-text evidence passages using Serper (Google Search API alternative).
+    Serper returns search result URLs; pages are crawled the same way as GoogleClaimSearch.
+    """
+    api_key: str = Field(..., description="Serper API key")
+    tool_call_counts: int = 0
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def _fetch(self, url: str) -> Dict[str, Any]:
+        try:
+            scraper = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "windows", "mobile": False}
+            )
+            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            page.raise_for_status()
+
+            content_type = page.headers.get('Content-Type', '').lower()
+            is_pdf = 'application/pdf' in content_type or url.lower().endswith('.pdf')
+
+            if is_pdf:
+                try:
+                    with pdfplumber.open(BytesIO(page.content)) as pdf:
+                        full_text = "".join(
+                            (p.extract_text() or "") + "\n" for p in pdf.pages
+                        )
+                    title = url.split('/')[-1] if '/' in url else "PDF Document"
+                    return {"title": title, "cleaned": full_text.strip()}
+                except Exception as pdf_error:
+                    return {"title": "", "error": f"[Error extracting PDF] {pdf_error}"}
+            else:
+                soup = BeautifulSoup(page.text, "html.parser")
+                title = (soup.title.string or "").strip() if soup.title else ""
+                cleaned = _clean_html(page.text)
+                return {"title": title, "cleaned": cleaned}
+        except Exception as e:
+            return {"title": "", "error": f"[Error fetching] {e}"}
+
+    def invoke(self, claims: List[str], q: str, gl: str, **kwargs) -> str:
+        try:
+            resp = requests.post(
+                "https://google.serper.dev/search",
+                headers={"X-API-KEY": self.api_key, "Content-Type": "application/json"},
+                json={"q": q, "gl": gl, "num": TOP_K_RESULTS},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            self.tool_call_counts += 1
+            items = resp.json().get("organic", [])
+
+            all_passages: List[str] = []
+            api_snippets: List[str] = []  # always collected from Serper, regardless of crawl outcome
+            page_info: List[Dict[str, Any]] = []
+            failed_attempts: List[Dict[str, str]] = []
+            successful_count = 0
+
+            for it in items:
+                url = it.get("link")
+                snippet = it.get("snippet", "")
+                title = it.get("title", "")
+
+                # Always store the API snippet — used as guaranteed fallback evidence
+                if snippet:
+                    api_snippets.append(snippet)
+
+                if not url or successful_count >= MAX_SUCCESSFUL_PAGES:
+                    continue
+
+                # Try full page crawl
+                fetched = self._fetch(url)
+                crawl_ok = (
+                    "error" not in fetched
+                    and fetched.get("cleaned", "").strip() != "[content-extraction-failed]"
+                )
+                if crawl_ok:
+                    passages = _split_passages(fetched["cleaned"])
+                    if passages and any(p.strip() for p in passages):
+                        all_passages.extend(passages)
+                        page_info.append({"title": fetched["title"] or title, "link": url, "source": "crawled"})
+                        successful_count += 1
+                        continue
+
+                # Crawl failed — note it; snippet already saved above
+                failed_attempts.append({"url": url, "error": fetched.get("error", "No meaningful content extracted")})
+                if snippet:
+                    page_info.append({"title": title, "link": url, "source": "api_snippet"})
+
+            # Build text_block: prefer crawled passages; fall back to API snippets
+            if all_passages:
+                passages_set: List[str] = []
+                for claim in claims:
+                    passages_set.extend(_top_passages(claim, all_passages))
+                text_block = list(set(passages_set))
+            elif api_snippets:
+                logging.info("[SerperSearch] All crawls failed; using API snippets as text_block.")
+                text_block = ["Failed to extract text from the url. Please refer to the snippets instead."]*len(api_snippets)
+            else:
+                error_details = "; ".join(f"{fa['url']}: {fa['error']}" for fa in failed_attempts[:3])
+                text_block = [f"Failed to extract text from all {len(failed_attempts)} URLs tried. Details: {error_details}"]
+
+            results = [{
+                "query": q,
+                "gl": gl,
+                "pages": page_info,
+                "text_block": text_block,
+                "api_snippets": api_snippets,  # always present for evaluator fallback
+            }]
+            return json.dumps(results, ensure_ascii=False)
+        except Exception as outer:
+            return json.dumps([{"query": q, "gl": gl, "text_block": f"Search failure: {outer}", "api_snippets": []}], ensure_ascii=False)
+
+    @staticmethod
+    def get_info() -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": "serper_search",
+                "description": (
+                    "Given a factual claim, run a Serper (Google Search) with query `q` and geolocation `gl`, "
+                    f"crawl result pages (trying up to {TOP_K_RESULTS} URLs with fallback on failure), "
+                    "and return extracted plain texts as a JSON string."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "q": {
+                            "type": "string",
+                            "description": "Search query for fact verification. Do not include quotation marks.",
+                        },
+                        "gl": {
+                            "type": "string",
+                            "description": "Geolocation country code (e.g., 'us', 'uk', 'kr') to tailor search results.",
+                        },
+                    },
+                    "required": ["q", "gl"],
+                },
+            },
+        }
+
+    def calculate_cost(self) -> float:
+        # Serper pricing: $50 per 2500 queries (~$0.02/query) after free tier
+        cost_per_query = 0.02
+        return self.tool_call_counts * cost_per_query
+
+
+class TavilySearch(BaseModel):
+    """
+    LiteLLM-compatible tool:
+    given a claim, return plain-text evidence passages using Tavily Search API.
+    Tries full page crawling first; Tavily's pre-extracted content is stored as api_snippets
+    and used as text_block fallback when crawling fails.
+    """
+    api_key: str = Field(..., description="Tavily API key")
+    tool_call_counts: int = 0
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def _fetch(self, url: str) -> Dict[str, Any]:
+        try:
+            scraper = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "windows", "mobile": False}
+            )
+            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            page.raise_for_status()
+
+            content_type = page.headers.get('Content-Type', '').lower()
+            is_pdf = 'application/pdf' in content_type or url.lower().endswith('.pdf')
+
+            if is_pdf:
+                try:
+                    with pdfplumber.open(BytesIO(page.content)) as pdf:
+                        full_text = "".join(
+                            (p.extract_text() or "") + "\n" for p in pdf.pages
+                        )
+                    title = url.split('/')[-1] if '/' in url else "PDF Document"
+                    return {"title": title, "cleaned": full_text.strip()}
+                except Exception as pdf_error:
+                    return {"title": "", "error": f"[Error extracting PDF] {pdf_error}"}
+            else:
+                soup = BeautifulSoup(page.text, "html.parser")
+                title = (soup.title.string or "").strip() if soup.title else ""
+                cleaned = _clean_html(page.text)
+                return {"title": title, "cleaned": cleaned}
+        except Exception as e:
+            return {"title": "", "error": f"[Error fetching] {e}"}
+
+    def invoke(self, claims: List[str], q: str, gl: str, **kwargs) -> str:
+        try:
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": self.api_key,
+                    "query": q,
+                    "search_depth": "basic",
+                    "max_results": TOP_K_RESULTS,
+                    "include_raw_content": False,
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            self.tool_call_counts += 1
+            raw_results = resp.json().get("results", [])
+
+            if not raw_results:
+                return json.dumps(
+                    [{"query": q, "gl": gl, "pages": [], "text_block": ["No results found."], "api_snippets": []}],
+                    ensure_ascii=False,
+                )
+
+            all_passages: List[str] = []
+            api_snippets: List[str] = []  # Tavily content — always collected as guaranteed evidence
+            page_info: List[Dict[str, Any]] = []
+            successful_count = 0
+
+            for r in raw_results:
+                url = r.get("url", "")
+                content = r.get("content", "")
+                title = r.get("title", "")
+
+                # Always store Tavily's content snippet
+                if content:
+                    api_snippets.append(content)
+
+                # Try full page crawl first
+                if url and successful_count < MAX_SUCCESSFUL_PAGES:
+                    fetched = self._fetch(url)
+                    crawl_ok = (
+                        "error" not in fetched
+                        and fetched.get("cleaned", "").strip() != "[content-extraction-failed]"
+                    )
+                    if crawl_ok:
+                        passages = _split_passages(fetched["cleaned"])
+                        if passages and any(p.strip() for p in passages):
+                            all_passages.extend(passages)
+                            page_info.append({"title": fetched["title"] or title, "link": url, "source": "crawled"})
+                            successful_count += 1
+                            continue
+
+                # Crawl failed — use Tavily's content as passage source
+                if content:
+                    logging.info(f"[TavilySearch] Crawl failed for {url}, using Tavily API content.")
+                    all_passages.extend(_split_passages(content, max_chars=2000, min_chars=200))
+                    page_info.append({"title": title, "link": url, "source": "api_snippet"})
+
+            passages_set: List[str] = []
+            for claim in claims:
+                passages_set.extend(_top_passages(claim, all_passages))
+            text_block = list(set(passages_set)) or all_passages[:3]
+
+            results = [{
+                "query": q,
+                "gl": gl,
+                "pages": page_info,
+                "text_block": text_block,
+                "api_snippets": api_snippets,  # always present for evaluator fallback
+            }]
+            return json.dumps(results, ensure_ascii=False)
+        except Exception as outer:
+            return json.dumps([{"query": q, "gl": gl, "text_block": f"Search failure: {outer}", "api_snippets": []}], ensure_ascii=False)
+
+    @staticmethod
+    def get_info() -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": "tavily_search",
+                "description": (
+                    "Given a factual claim, run a Tavily search with query `q` and geolocation `gl`, "
+                    "and return pre-extracted content snippets as a JSON string. "
+                    "Tavily is optimized for AI fact-verification tasks."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "q": {
+                            "type": "string",
+                            "description": "Search query for fact verification. Do not include quotation marks.",
+                        },
+                        "gl": {
+                            "type": "string",
+                            "description": "Geolocation country code (e.g., 'us', 'uk', 'kr') to tailor search results.",
+                        },
+                    },
+                    "required": ["q", "gl"],
+                },
+            },
+        }
+
+    def calculate_cost(self) -> float:
+        # Tavily pricing: ~$0.01 per API credit (1 search = 1 credit)
+        cost_per_query = 0.01
+        return self.tool_call_counts * cost_per_query

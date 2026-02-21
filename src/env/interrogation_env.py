@@ -5,7 +5,7 @@ from src.env.interviewee_simulator.simulator_factory import get_interviewee_simu
 from src.agents.agent_factory import get_agent
 from src.schemas import State, Action, Observation, Turn, ToolOutput, IntervieweeResponse
 from src.tools.address_locator import GoogleGeocodeValidate
-from src.tools.web_search import GoogleClaimSearch
+from src.tools.web_search import GoogleClaimSearch, SerperSearch, TavilySearch
 from pydantic import BaseModel, Field
 from src.utils import read_json, write_json, get_completion
 import logging
@@ -375,10 +375,8 @@ if __name__ == "__main__":
         user_id=os.getenv('CAI_API_KEY'),
         name="Elon Musk",
         tools={
-            "google_claim_search": GoogleClaimSearch(
-                api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
-                cx=os.getenv('GOOGLE_CX_ID'),
-            ),
+            "serper_search": SerperSearch(api_key=os.getenv('SERPER_API_KEY')),
+            # "tavily_search": TavilySearch(api_key=os.getenv('TAVILY_API_KEY')),
             "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
         },
     )

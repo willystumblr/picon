@@ -86,7 +86,8 @@ class WebSearchAgent(Agent):
             tool_call = res_['tool_calls'][0]
             tool_name = tool_call['function']['name']
             arguments = json.loads(tool_call['function']['arguments'])
-            if claims and tool_name == 'google_claim_search':
+            _SEARCH_TOOL_NAMES = {'google_claim_search', 'custom_search_api', 'serper_search', 'tavily_search'}
+            if claims and tool_name in _SEARCH_TOOL_NAMES:
                 arguments['claims'] = claims
             return Action(
                 agent=self.role,

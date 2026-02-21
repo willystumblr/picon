@@ -23,31 +23,36 @@ Generate tool calls for proper tools for each entity. When generating query, do 
 
 ### Query Guide
 
-* When writing the query, prioritize the entity. Since there may be other objects that share the same name as the entity, it is best to search using the combination of **[Entity + attribute of the entity mentioned in the claim]**.
-* If you cannot find any hint about the entity in the claim, use the entity itself as the query.
-
 #### Examples
 
-* claim: Elon Musk is a real person → query: `Elon Musk the person`
-* claim: KAIST is a real university → query: `KAIST the university`
-* claim: Seoul is a real location → query: `Seoul the place`
-* claim: Tesla is a real company → query: `Tesla the company`
-* claim: Entity 'Tesla' exists → query: `Tesla`
+* claims: ["Elon Musk is a real person"] → query: `Elon Musk the person`
+* claims: ["KAIST is a real university"] → query: `KAIST the university`
+* claims: ["Seoul is a real location"] → query: `Seoul the place`
+* claims: ["Tesla is a real company"] → query: `Tesla the company`
+* claims: ["The entity 'Tesla' exists"] → query: `Tesla`
+
+* claims: ["The 'EB-5 visa' is a real visa type for the United States.", "The EB-5 visa is granted to foreign investors who invest in U.S. businesses.", "The EB-5 visa program requires the creation or preservation of jobs for U.S. workers."] => query: EB-5 visa US investor job creation requirements
+* claims: ["The organization 'USCIS' is a real organization.", "USCIS was the enforcing authority for the EB-5 visa program rules in 2001."] => query: `USCIS EB-5 visa 2001`
+* claims: ['CS61B is the CalCentral course ID code shown in the UC Berkeley CalCentral course URL for the CS61B course.'] => query: CS61B UC Berkeley CalCentral
 
 ---
 
-### Additional Rule For Identifiers (Codes, Serials, Form Numbers)
+### Additional Rule For Identifiers (Codes, Serials, Form Numbers, Web Address)
 
-* If the entity is a specific alphanumeric string (e.g., `"798/71"`, `"Form 075"`), searching the string itself often fails.
-* Instead, verify the **format rules**.
-* Construct the query using the **Document Type** or **System Name** from the claim + words like `"format"`, `"structure"`, or `"syntax"`.
+* If the entity is a specific alphanumeric string (e.g., `"798/71"`, `"Form 075"`) or a full website address (`https://<SOME_DOMAIN>.com`), searching the string itself often fails.
+* Instead, 
+    * alphanumeric strings: verify the **format rules**. Construct the query using the **Document Type** or **System Name** from the claim + words like `"format"`, `"structure"`, or `"syntax"`.
+    * search the domain name and the base path (the last component) without its protocol. e.g., https://github.com/ => github
+
 
 #### Example
 
 * entity: `798/71`
-
-* claim: `"Birth registration numbers in Pretoria, South Africa, use a format containing a sequence of numbers followed by a slash and a two-digit year."`
-
+* claim: [`"Birth registration numbers in Pretoria, South Africa, use a format containing a sequence of numbers followed by a slash and a two-digit year."`]
 * query: `Pretoria birth registration number format`
+
+* entity: `https://github.com/google/BIG-bench` (URL)
+* claim: [`"The Github repo of BIG-bench project is 'https://github.com/google/BIG-bench'."`]
+* query: `github BIG-bench`
 
 * IMPORTANT: Never use external knowledge to construct a query. Just follow the guide.

@@ -331,8 +331,10 @@ if __name__ == "__main__":
                 "port": args.simulator_port
             })
     elif args.baseline_name == "persona_hub":
-        #dataset = load_dataset("proj-persona/PersonaHub", "persona", split="train")
-        dataset = read_jsonl("src/env/personas/persona_hub/named_personas_with_key.jsonl")
+        dataset = load_dataset("proj-persona/PersonaHub", "persona", split="train")
+        #dataset = read_jsonl("src/env/personas/persona_hub/named_personas_with_key.jsonl")
+        if args.do_sample:
+            dataset = dataset.shuffle(seed=args.seed).select(range(10))
         # if args.do_sample:
         #     dataset = dataset.shuffle(seed=args.seed).select(range(10))
         if args.do_sample:

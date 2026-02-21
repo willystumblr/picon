@@ -281,6 +281,8 @@ class EvaluatorAgent(Agent):
     
     def __generate_fact_verification(self, claim: str, search_result: str,
                                        main_question: str, main_response: str,
+                                       confirmation_question: str = None,
+                                       confirmation_response: str = None,
                                        log_prompt: bool = False):
         """Verify a single claim against the search result.
 
@@ -305,16 +307,32 @@ class EvaluatorAgent(Agent):
                 rationale="The search result returned no content (entity does not exist or could not be found). The claim is therefore refuted."
             )
 
+        # Build confirmation context if available
+        confirmation_context = ""
+        if confirmation_question and confirmation_response:
+            confirmation_context = (
+                f"\n\nConfirmation Question: {confirmation_question}"
+                f"\nInterviewee's Confirmation Response: {confirmation_response}"
+                "\n\n**Important:** When determining supported, refuted, or nei, you MUST consider the interviewee's confirmation response. "
+                "If the interviewee confirmed that two different names refer to the same entity, treat them as the same entity for your judgment. "
+                "For example, if the confirmation question asks whether 'Yangjae Industry-Academic Campus' is the 'AI Support Center in the Yangjae AI Innovation District', "
+                "and the interviewee responds 'Yes', then you should treat 'Yangjae Industry-Academic Campus' and 'AI Support Center' as the same entity "
+                "and use evidence about either one to verify claims about the other."
+            )
+
         user_content = f"""Claim to verify: {claim}
 
-Search Result (Evidence): {search_result}
+    Search Result (Evidence): {search_result} {confirmation_context}
 
-Based on the search result evidence, determine whether the claim is:
-1. **supported**: The search result provides evidence that supports/confirms the claim.
-2. **refuted**: The search result provides evidence that contradicts/refutes the claim.
-3. **nei**: The search result does not provide enough information to verify or refute the claim.
+    When making your judgment, consider not only the main text but also other elements in the search result, such as links. For example, if a link contains a country domain (e.g., .kr, .jp, .us), you may assume the institution exists in that country.
 
-Determine which label best fits."""
+    Based on the search result evidence and confirmation response, determine whether the claim is:
+    1. **supported**: The search result provides evidence that supports/confirms the claim.
+    2. **refuted**: The search result provides evidence that contradicts/refutes the claim.
+    3. **nei**: The search result does not provide enough information to verify or refute the claim.
+    fyi: Minor differences in spacing (whitespace) between names can be ignored when determining if two names refer to the same entity.
+
+    Determine which label best fits."""
 
         if log_prompt:
             logging.info(f"[Fact Verification] System Prompt:\n{self.fact_verification_prompt}")
@@ -674,6 +692,8 @@ Determine which label best fits."""
                             'search_result': item['search_result'],
                             'main_question': item['main_question'],
                             'main_response': item['main_response'],
+                            'confirmation_question': item['confirmation_question'],
+                            'confirmation_response': item['confirmation_response'],
                             'turn_idx': item['turn_idx'],
                             'entity': item.get('entity', 'unknown')
                         })
@@ -686,6 +706,8 @@ Determine which label best fits."""
                             search_result=task['search_result'],
                             main_question=task['main_question'],
                             main_response=task['main_response'],
+                            confirmation_question=task['confirmation_question'],
+                            confirmation_response=task['confirmation_response'],
                             # log_prompt=(idx < 3)
                         )
 
@@ -704,6 +726,8 @@ Determine which label best fits."""
                             'claim': task['claim'],
                             'main_question': task['main_question'],
                             'main_response': task['main_response'],
+                            'confirmation_question': task['confirmation_question'],
+                            'confirmation_response': task['confirmation_response'],
                             'search_result': task['search_result'],
                             'rationale': fv_result.rationale
                         }

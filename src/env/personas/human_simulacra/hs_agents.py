@@ -1,8 +1,8 @@
 import os
 import argparse
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_community.callbacks.manager import get_openai_callback
 import json
 import re
 import sys
@@ -15,7 +15,99 @@ from litellm import get_max_tokens
 load_dotenv()  # Load environment variables from .env file
 BASE_DIR = os.path.dirname(__file__)
 PROMPT_DIR = f"{BASE_DIR}/prompts"
-BASE_URL = "https://api.openai.com/v1"
+BASE_URL = "https://api.openai.com/v1"  # For RAG embeddings (OpenAI)
+
+
+def extract_content(response) -> str:
+    """Extract string content from LLM response, handling list responses from Gemini API."""
+    content = response.content
+    if isinstance(content, list):
+        return "".join([part.get("text", str(part)) if isinstance(part, dict) else str(part) for part in content])
+    return content
+
+
+def get_chat_model(model: str, temperature: float = 0.0, api_key: str = None):
+    """Return appropriate chat model based on model name."""
+    if model.startswith("gpt") or model.startswith("o1") or model.startswith("o3"):
+        return ChatOpenAI(
+            api_key=api_key or os.environ.get('OPENAI_API_KEY'),
+            model=model,
+            temperature=temperature
+        )
+    else:  # Gemini models
+        return ChatGoogleGenerativeAI(
+            google_api_key=api_key or os.environ.get('GOOGLE_API_KEY'),
+            model=model,
+            temperature=temperature,
+            # Disable Automatic Function Calling (AFC)
+            additional_kwargs={
+                "tool_config": {
+                    "function_calling_config": {
+                        "mode": "NONE"
+                    }
+                }
+            }
+        )
+
+
+# Pricing per 1M tokens (as of 2024)
+MODEL_PRICING = {
+    # OpenAI models
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    # Gemini models
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.5},
+    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},  # estimated
+}
+
+
+def get_model_pricing(model: str) -> dict:
+    """Get pricing for a model. Returns default pricing if model not found."""
+    # Try exact match first
+    if model in MODEL_PRICING:
+        return MODEL_PRICING[model]
+    # Try prefix match
+    for key in MODEL_PRICING:
+        if model.startswith(key):
+            return MODEL_PRICING[key]
+    # Default pricing (conservative estimate)
+    return {"input": 1.00, "output": 3.00}
+
+
+def calculate_cost_from_response(response, model: str) -> float:
+    """Calculate cost from LLM response metadata."""
+    pricing = get_model_pricing(model)
+    
+    # Try to get token usage from response metadata (multiple possible locations)
+    usage_metadata = None
+    
+    # Try direct attribute
+    if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        usage_metadata = response.usage_metadata
+    # Try response_metadata dict
+    elif hasattr(response, 'response_metadata') and response.response_metadata:
+        rm = response.response_metadata
+        usage_metadata = rm.get('usage_metadata') or rm.get('token_usage') or rm.get('usage')
+    
+    if usage_metadata:
+        if isinstance(usage_metadata, dict):
+            input_tokens = usage_metadata.get('input_tokens', 0) or usage_metadata.get('prompt_tokens', 0) or usage_metadata.get('prompt_token_count', 0)
+            output_tokens = usage_metadata.get('output_tokens', 0) or usage_metadata.get('completion_tokens', 0) or usage_metadata.get('candidates_token_count', 0)
+        else:
+            input_tokens = getattr(usage_metadata, 'input_tokens', 0) or getattr(usage_metadata, 'prompt_tokens', 0) or getattr(usage_metadata, 'prompt_token_count', 0)
+            output_tokens = getattr(usage_metadata, 'output_tokens', 0) or getattr(usage_metadata, 'completion_tokens', 0) or getattr(usage_metadata, 'candidates_token_count', 0)
+        
+        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+        
+        if cost == 0.0 and (input_tokens > 0 or output_tokens > 0):
+            logging.warning(f"Cost calculation resulted in 0 despite tokens: input={input_tokens}, output={output_tokens}")
+        
+        return cost
+    
+    logging.warning(f"Could not extract token usage from response for model {model}. Response type: {type(response)}")
+    return 0.0
+
+
 CHARACTERS = ["Mary Jones", "Haley Collins", "Sara Ochoa", "James Jones", "Tami Clark", "Michael Miller", "Kevin Kelly", "Erica Walker", "Leslie Nichols", "Robert Scott", "Marsh Zhaleh"]
 INTRODUCTIONS_PATH = f"{BASE_DIR}/Characters/character_introductions.json"
 STORY_DIR = f"{BASE_DIR}/Characters/Stories"
@@ -41,26 +133,16 @@ class Memory_agent:
     # (1) Add long-term memory, stored in Long_memory.json;
     # (2) Add short-term memory, stored in Short_memory.txt;
     # (3) Retrieval: Retrieve the most relevant memory summaries from Index.json using LLM based on the query, then find the corresponding memories in Long_memory.json.
-    def __init__(self, character_name, model: str="gpt-4.1-mini-2025-04-14", temperature=0.0, api_base=BASE_URL, api_key=os.environ['OPENAI_API_KEY']):
+    def __init__(self, character_name, model: str="gemini-3-flash-preview", temperature=0.0, api_key=None):
         
         self.name = character_name
+        self.model = model
         self.temperature = temperature
-        self.api_base = api_base
         self.api_key = api_key
         self.path = os.path.join(MEMORY_DIR, character_name)
         self.cost = 0.0
-        self.sum = ChatOpenAI(
-            openai_api_base=self.api_base,
-            openai_api_key=self.api_key,
-            model=model,
-            temperature = self.temperature
-        )
-        self.retrieval = ChatOpenAI(
-            openai_api_base=self.api_base,
-            openai_api_key=self.api_key,
-            model=model,
-            temperature = self.temperature
-        )
+        self.sum = get_chat_model(model=model, temperature=self.temperature, api_key=self.api_key)
+        self.retrieval = get_chat_model(model=model, temperature=self.temperature, api_key=self.api_key)
         self.system_prompt = open(os.path.join(PROMPT_DIR, "memory_agent_system_prompt_template.txt")).read().format(
             character_name = self.name
         )
@@ -78,9 +160,9 @@ class Memory_agent:
         messages.append(HumanMessage(content=user_prompt))
 
         # Generate summary
-        with get_openai_callback() as cb:
-            summary = self.sum(messages).content
-            self.cost += cb.total_cost
+        response = self.sum.invoke(messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        summary = extract_content(response)
         return summary
 
     def Save_index_file(self, index):
@@ -186,10 +268,12 @@ class Memory_agent:
             query = Query
         )
         messages2.append(HumanMessage(content=user_prompt))
-        with get_openai_callback() as cb:
-            ans = self.retrieval.invoke(messages1).content
-            ans += self.retrieval.invoke(messages2).content
-            self.cost += cb.total_cost
+        response1 = self.retrieval.invoke(messages1)
+        response2 = self.retrieval.invoke(messages2)
+        self.cost += calculate_cost_from_response(response1, self.model)
+        self.cost += calculate_cost_from_response(response2, self.model)
+        ans = extract_content(response1)
+        ans += extract_content(response2)
         pattern = r'"\d{3}"'  
         matches = re.findall(pattern, ans)  
         result_list = list(set([match.strip('"') for match in matches]))
@@ -201,20 +285,15 @@ class Thinking_agent:
     # The Thinking_agent class is responsible for the following functions:
     # (1) Analyze the thinking process of the character based on the query;
     # (2) Construct "Memory Content" and "thinking" based on a segment of the Life_story.
-    def __init__(self, character_infos, character_name, character_biography, personality_traits, model: str="gpt-4.1-mini-2025-04-14", temperature=0.0, api_base=BASE_URL, api_key=os.environ['OPENAI_API_KEY']):
-        self.api_base = api_base
+    def __init__(self, character_infos, character_name, character_biography, personality_traits, model: str="gemini-3-flash-preview", temperature=0.0, api_key=None):
         self.api_key = api_key
+        self.model = model
         self.infos = character_infos
         self.name = character_name
         self.biography = character_biography
-        self.personality_traits = personality_traits,
+        self.personality_traits = personality_traits
         self.temperature = temperature
-        self.think = ChatOpenAI(
-            openai_api_base=self.api_base,
-            openai_api_key=self.api_key,
-            model=model,
-            temperature = self.temperature
-        )
+        self.think = get_chat_model(model=model, temperature=self.temperature, api_key=self.api_key)
         self.cost = 0.0
     
     def Memory_construction(self, LifeStory_chunk):
@@ -231,10 +310,9 @@ class Thinking_agent:
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
         # Generate memory
-        with get_openai_callback() as cb:
-            ans = self.think.invoke(messages)
-            self.cost += cb.total_cost
-        return ans.content
+        response = self.think.invoke(messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        return extract_content(response)
     
     def Thinking_Memory_construction(self, memory_chunk):
         # Generate the character's thinking about a memory chunk
@@ -251,10 +329,9 @@ class Thinking_agent:
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
         # Generate thinking about the memory chunk
-        with get_openai_callback() as cb:
-            ans = self.think.invoke(messages)
-            self.cost += cb.total_cost
-        return ans.content
+        response = self.think.invoke(messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        return extract_content(response)
     
     def Thinking_analysis(self, query):
         # Analyze the character's current thinking process based on the query
@@ -271,29 +348,22 @@ class Thinking_agent:
 
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
-        with get_openai_callback() as cb:
-            Thinking_result = self.think.invoke(messages)
-            self.cost += cb.total_cost
-            
-        return Thinking_result.content
+        response = self.think.invoke(messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        return extract_content(response)
 
 class Emotion_agent:
     # The Emotion_agent class is responsible for the following functions:
     # (1) Analyze the character's current emotional state based on the query;
     # (2) Construct "Emotion" based on a segment of the Life_story.
-    def __init__(self, character_infos, character_name, personality_traits, model:str, temperature=0.0, api_base=BASE_URL, api_key=os.environ['OPENAI_API_KEY']):
-        self.api_base = api_base
+    def __init__(self, character_infos, character_name, personality_traits, model: str="gemini-3-flash-preview", temperature=0.0, api_key=None):
         self.api_key = api_key
+        self.model = model
         self.infos = character_infos
         self.name = character_name
         self.personality_traits = personality_traits
         self.temperature = temperature
-        self.emotion = ChatOpenAI(
-            openai_api_base=self.api_base,
-            openai_api_key=self.api_key,
-            model=model,
-            temperature = self.temperature
-        )
+        self.emotion = get_chat_model(model=model, temperature=self.temperature, api_key=self.api_key)
         self.cost = 0.0
 
     def Memory_construction(self, LifeStory_chunk):
@@ -311,10 +381,9 @@ class Emotion_agent:
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
         # Generate emotional memory
-        with get_openai_callback() as cb:
-            ans = self.emotion.invoke(messages)
-            self.cost += cb.total_cost
-        return ans.content
+        response = self.emotion.invoke(messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        return extract_content(response)
 
 
     def Emotion_analysis(self, query):
@@ -332,11 +401,9 @@ class Emotion_agent:
         
         messages.append(SystemMessage(content=sys_prompt))
         messages.append(HumanMessage(content=user_prompt))
-
-        with get_openai_callback() as cb:
-            emo_result = self.emotion.invoke(messages)
-            self.cost += cb.total_cost
-        return emo_result.content
+        response = self.emotion.invoke(messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        return extract_content(response)
     
 
 class Top_agent:
@@ -345,8 +412,7 @@ class Top_agent:
     # (2) Construct and maintain working memory;
     # (3) Answer queries based on working memory.
       
-    def __init__(self, character_name, model:str="gpt-4.1-mini", temperature = 1.0, api_base = BASE_URL, api_key = os.environ['OPENAI_API_KEY']):
-        self.api_base = api_base
+    def __init__(self, character_name, model: str="gemini-3-flash-preview", temperature=1.0, api_key=None):
         self.api_key = api_key
         self.cost = 0.0
         self.name = character_name
@@ -374,16 +440,11 @@ class Top_agent:
             sys.exit(1)
 
         # Initialize three agents
-        self.Thinking_Agent = Thinking_agent(character_infos=self.infos, personality_traits=self.personality_traits, character_name=self.name, character_biography=self.biography, model=model, temperature=self.temperature)
-        self.Emotion_Agent = Emotion_agent(character_infos=self.infos, personality_traits=self.personality_traits, character_name=self.name, model=model, temperature=self.temperature)
-        self.Memory_Agent = Memory_agent(character_name=self.name, model=model, temperature=self.temperature)
+        self.Thinking_Agent = Thinking_agent(character_infos=self.infos, personality_traits=self.personality_traits, character_name=self.name, character_biography=self.biography, model=model, temperature=self.temperature, api_key=self.api_key)
+        self.Emotion_Agent = Emotion_agent(character_infos=self.infos, personality_traits=self.personality_traits, character_name=self.name, model=model, temperature=self.temperature, api_key=self.api_key)
+        self.Memory_Agent = Memory_agent(character_name=self.name, model=model, temperature=self.temperature, api_key=self.api_key)
         
-        self.chat = ChatOpenAI(
-            openai_api_key = self.api_key,
-            openai_api_base = self.api_base,
-            model = model,
-            temperature = self.temperature
-        )
+        self.chat = get_chat_model(model=model, temperature=self.temperature, api_key=self.api_key)
         system_prompt = open(os.path.join(PROMPT_DIR, "naive_simulacra_prompt_template.txt")).read().format(
             character_name = self.name,
             basic_information = self.infos,
@@ -551,9 +612,9 @@ class Top_agent:
                 )
             
             current_messages.append(SystemMessage(content=user_prompt))
-            with get_openai_callback() as cb:
-                agents_ans = self.chat(current_messages).content
-                # self.cost += cb.total_cost
+            response = self.chat.invoke(current_messages)
+            self.cost += calculate_cost_from_response(response, self.model)
+            agents_ans = extract_content(response)
             print(agents_ans )
             chat_history.append("The other person: " + query)
             chat_history.append("You: " + agents_ans)
@@ -634,9 +695,9 @@ class Top_agent:
         flattened_messages = [item for sublist in self.current_messages for item in sublist]
         # Flatten the list of lists
         
-        with get_openai_callback() as cb:
-            agents_ans = self.chat.invoke([self.system_prompt] + flattened_messages).content # solely for the top agent
-            self.cost += cb.total_cost
+        response = self.chat.invoke([self.system_prompt] + flattened_messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        agents_ans = extract_content(response)
         
         temp_chat_history.append("The other person: " + message)
         temp_chat_history.append("You: " + agents_ans)
@@ -686,10 +747,9 @@ class Top_agent:
             )
         
         messages.append(SystemMessage(content=user_prompt))
-        with get_openai_callback() as cb:
-            agents_ans = self.chat.invoke(messages)
-            self.cost += cb.total_cost
-        return agents_ans.content
+        response = self.chat.invoke(messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        return extract_content(response)
     
     def evaluation_chat(self, query):
         # For evaluation only
@@ -713,12 +773,8 @@ class Top_agent:
             )
         return user_prompt
 
-def Bandwagon_chat_with_naive_prompt(character_name, query, model:str="gpt-4.1-mini-2025-04-14", chat_history=None):
-    chat = ChatOpenAI(
-        openai_api_key = os.environ['OPENAI_API_KEY'],
-        openai_api_base = BASE_URL,
-        model = model
-    )
+def Bandwagon_chat_with_naive_prompt(character_name, query, model: str="gemini-3-flash-preview", chat_history=None):
+    chat = get_chat_model(model=model)
     flag = False
     with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
         introductions = json.load(file)
@@ -754,12 +810,8 @@ def Bandwagon_chat_with_naive_prompt(character_name, query, model:str="gpt-4.1-m
     agents_ans = chat(messages)
     return agents_ans.content
 
-def Bandwagon_chat_with_blank_model(query, model:str="gpt-4.1-mini-2025-04-14", chat_history=None):
-    chat = ChatOpenAI(
-        openai_api_key = os.environ['OPENAI_API_KEY'],
-        openai_api_base = BASE_URL,
-        model = model
-    )
+def Bandwagon_chat_with_blank_model(query, model: str="gemini-3-flash-preview", chat_history=None):
+    chat = get_chat_model(model=model)
     messages = []
     if chat_history:
         messages += chat_history
@@ -767,12 +819,8 @@ def Bandwagon_chat_with_blank_model(query, model:str="gpt-4.1-mini-2025-04-14", 
     agents_ans = chat(messages)
     return agents_ans.content
 
-def Bandwagon_chat_with_naive_rag(character_name, query, model:str="gpt-4.1-mini-2025-04-14", chat_history=None):
-    chat = ChatOpenAI(
-        openai_api_key = os.environ['OPENAI_API_KEY'],
-        openai_api_base = BASE_URL,
-        model = model
-    )
+def Bandwagon_chat_with_naive_rag(character_name, query, model: str="gemini-3-flash-preview", chat_history=None):
+    chat = get_chat_model(model=model)
     flag = False
     with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
         introductions = json.load(file)
@@ -834,15 +882,10 @@ def Bandwagon_chat_with_naive_rag(character_name, query, model:str="gpt-4.1-mini
 
 class Naive_Agent:
     # The Naive_Agent class is responsible for multi-turn chat with naive prompt only.
-    def __init__(self, character_name, model:str="gpt-4.1-mini-2025-04-14"):
-        self.api_base = BASE_URL
-        self.api_key = os.environ['OPENAI_API_KEY']
+    def __init__(self, character_name, model: str="gemini-3-flash-preview"):
         self.name = character_name
-        self.chat = ChatOpenAI(
-            openai_api_key = self.api_key,
-            openai_api_base = self.api_base,
-            model = model
-        )
+        self.model = model
+        self.chat = get_chat_model(model=model)
         self.cost = 0.0
         flag = False
         with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
@@ -885,9 +928,9 @@ class Naive_Agent:
             self.current_messages.append(SystemMessage(content="You're chatting with someone in a coffee shop."))
             
         self.current_messages.append(HumanMessage(content=message))
-        with get_openai_callback() as cb:
-            agents_ans = self.chat.invoke(self.current_messages).content
-            self.cost += cb.total_cost
+        response = self.chat.invoke(self.current_messages)
+        self.cost += calculate_cost_from_response(response, self.model)
+        agents_ans = extract_content(response)
         self.chat_history.append(message)
         self.chat_history.append(agents_ans)
         return agents_ans
@@ -895,12 +938,8 @@ class Naive_Agent:
     def calculate_cost(self):
         return self.cost
 
-def Multi_turn_chat_with_naive_prompt(character_name, model:str="gpt-4.1-mini-2025-04-14"):
-    chat = ChatOpenAI(
-        openai_api_key = os.environ['OPENAI_API_KEY'],
-        openai_api_base = BASE_URL,
-        model = model
-    )
+def Multi_turn_chat_with_naive_prompt(character_name, model: str="gemini-3-flash-preview"):
+    chat = get_chat_model(model=model)
     flag = False
     with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
         introductions = json.load(file)
@@ -950,13 +989,9 @@ def Multi_turn_chat_with_naive_prompt(character_name, model:str="gpt-4.1-mini-20
             
     print("The conversation is over." )
 
-def Multi_turn_chat_with_blank_model(model:str="gpt-4.1-mini-2025-04-14"):
+def Multi_turn_chat_with_blank_model(model: str="gemini-3-flash-preview"):
     # blank model, which does not know anything about the character.
-    chat = ChatOpenAI(
-        openai_api_key = os.environ['OPENAI_API_KEY'],
-        openai_api_base = BASE_URL,
-        model = model
-    )
+    chat = get_chat_model(model=model)
     current_messages = []
     chat_history = []
     while True:
@@ -978,12 +1013,8 @@ def Multi_turn_chat_with_blank_model(model:str="gpt-4.1-mini-2025-04-14"):
             
     print("The conversation is over." )
 
-def Multi_turn_chat_with_naive_rag(character_name, model:str="gpt-4.1-mini-2025-04-14"):
-    chat = ChatOpenAI(
-        openai_api_key = os.environ['OPENAI_API_KEY'],
-        openai_api_base = BASE_URL,
-        model = model
-    )
+def Multi_turn_chat_with_naive_rag(character_name, model: str="gemini-3-flash-preview"):
+    chat = get_chat_model(model=model)
     flag = False
     with open(INTRODUCTIONS_PATH, "r", encoding="UTF-8") as file:
         introductions = json.load(file)

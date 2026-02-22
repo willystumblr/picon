@@ -1,7 +1,7 @@
 from src.utils import setup_logging, read_json, write_json, get_user_input_with_timeout, read_jsonl, get_completion
 from src.env.interrogation_env import InterrogationEnv
 from src.agents.agent_factory import get_agent
-from src.tools.web_search import GoogleClaimSearch
+from src.tools.web_search import SerperSearch, TavilySearch
 from src.tools.address_locator import GoogleGeocodeValidate
 from dotenv import load_dotenv
 import argparse
@@ -107,10 +107,8 @@ def run_interview(args, interviewee_kwarg):
     }
     
     tools = {
-            "google_claim_search": GoogleClaimSearch(
-                api_key=os.getenv('GOOGLE_CLAIM_SEARCH'),
-                cx=os.getenv('GOOGLE_CX_ID'),
-            ),
+            "serper_search": SerperSearch(api_key=os.getenv('SERPER_API_KEY')),
+            # "tavily_search": TavilySearch(api_key=os.getenv('TAVILY_API_KEY')),
             "google_geocode_validate": GoogleGeocodeValidate(api_key=os.getenv('GOOGLE_GEOCODE'))
         }
     

@@ -561,7 +561,7 @@ class SerperSearch(BaseModel):
                         },
                         "gl": {
                             "type": "string",
-                            "description": "Geolocation country code (e.g., 'us', 'uk', 'kr') to tailor search results.",
+                            "description": "Geolocation country code (e.g., 'us', 'uk', 'kr') of end user to tailor search results.",
                         },
                     },
                     "required": ["q", "gl"],

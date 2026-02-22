@@ -1,3 +1,6 @@
+
+# https://huggingface.co/datasets/proj-persona/PersonaHub
+
 from litellm.cost_calculator import completion_cost
 from streamlit import json
 from src.utils import get_completion
@@ -14,16 +17,17 @@ class PersonaHubSimulator(BaseIntervieweeSimulator):
         super().__init__(**kwargs)
         assert 'persona' in kwargs, "Persona Hub requires persona parameter"
         assert 'simulator_model' in kwargs, "Persona Hub requires simulator_model parameter"
-        print(f"You are {kwargs['name']} who are {kwargs['persona']}.\n\n")
+        print(f"You are {kwargs['persona']}.\n\n")
         self.history = [{
             "role": "system",
             "content": (
-                f"You are {kwargs['name']} who are {kwargs['persona']}\n\n"
+                f"You are {kwargs['persona']}\n\n"
                 "Please stay in your character and comply with the persona."
                 "Don't mention that you are an AI model."
             ),
         }]
-        self.simulator_model = kwargs['simulator_model']
+        self.client_or_model = kwargs['simulator_model']
+        self.max_tokens = self.get_max_token()
         
     
     def _get_response(self, message: str) -> IntervieweeResponse:
@@ -31,10 +35,10 @@ class PersonaHubSimulator(BaseIntervieweeSimulator):
                 "role": "user",
                 "content": message
             })
-            
+        self._truncate_history()
         
         res = get_completion(
-            model=self.simulator_model,
+            model=self.client_or_model,
             messages=self.history,
             reasoning_effort="low",
             # temperature=0.9,

@@ -19,6 +19,7 @@ Before you start the interview, **please make sure to read the following**!
   - Your information will be deleted as the research project is over.
 - Please be truthful in all questions, and if you do not want to provide further information, clearly express your refusal.
   - You can abstain from providing response and even change the topic by saying, for example, 'can we talk about something else?'
+- You don't need to be verbose- answer only what you are asked short and clearly.
 - **Please do NOT reload or exit the page**, or your interview log will be lost, and you will need to start over.
 
 Note: FYI, **this interview is being held on {cutoff_date}**.

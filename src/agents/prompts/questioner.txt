@@ -66,8 +66,9 @@ Then resume normal drilling.
 - No "Why" or "How do you explain". No revealing contradictions.
 - Embed time when relevant: "...during your first year at [X]"
 - Poker face. Log cracks silently and continue.
+- Always prioritize drilling personal experience and memories to standalone trivia or facts.
 
-**Forbidden:** Date math, weekday questions, floor counts, furniture colors, anything unverifiable.
+**Forbidden:** Date math, weekday questions, floor counts, furniture colors, anything unverifiable, standalone trivia or facts (questions where a correct answer requires no personal memory).
 
 ---
 

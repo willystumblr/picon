@@ -434,10 +434,10 @@ if __name__ == "__main__":
         for data in dataset:
             persona_number = data.get("persona_number")
             persona = {
-                "meta_persona": data.get("meta_persona", ""),
+                #"meta_persona": data.get("meta_persona", ""),
                 "descriptive_persona": data.get(f"{selected_prefix}_descriptive_persona", ""),
-                "objective_table_persona": data.get(f"{selected_prefix}_objective_table_persona", ""),
-                "subjective_table_persona": data.get(f"{selected_prefix}_subjective_table_persona", ""),
+                #"objective_table_persona": data.get(f"{selected_prefix}_objective_table_persona", ""),
+                #"subjective_table_persona": data.get(f"{selected_prefix}_subjective_table_persona", ""),
             }
             interviewee_kwargs.append({
                 "baseline_name": "llm_generated",
@@ -603,6 +603,7 @@ if __name__ == "__main__":
         
         # Add evaluation score aggregates if --do_eval was set
         if args.do_eval:
+            print("Computing evaluation scores across personas...")
             # Helper function to compute average of non-None values
             def avg_score(key):
                 values = [s.get(key) for s in all_persona_stats if s.get(key) is not None]

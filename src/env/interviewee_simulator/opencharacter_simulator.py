@@ -20,7 +20,7 @@ class OpenCharacterSimulator(BaseIntervieweeSimulator):
         assert 'simulator_model' in kwargs, "OpenCharacter requires simulator_model parameter"
         assert 'port' in kwargs, "OpenCharacter requires port parameter"
         super().__init__(**kwargs)
-        self.client_or_model = kwargs['model_path']
+        self.client_or_model = kwargs['simulator_model']
         
         self.tokenizer = AutoTokenizer.from_pretrained(kwargs['model_path'])
         self.history = [{
@@ -37,7 +37,8 @@ class OpenCharacterSimulator(BaseIntervieweeSimulator):
         self.simulator_model = kwargs['simulator_model']
         self.host = kwargs.get('simulator_host', 'localhost')
         self.port = kwargs['port']
-        self.max_tokens = self.get_max_token()
+        self.max_tokens = 8192
+        
         
     def _get_response(self, message: str) -> IntervieweeResponse:
         self.history.append({

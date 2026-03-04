@@ -38,11 +38,11 @@ class ConsistentLLMSimulator(BaseIntervieweeSimulator):
         self.history.append(f"Interviewer: {message}")
             
         while True:
-            input_message = self.persona + self.prompt_flag + '\n'.join(self.history) + self.instruction
-            messages = [{
-                "role": "user",
-                "content": input_message
-            }]
+            user_content = self.prompt_flag + '\n'.join(self.history) + self.instruction
+            messages = [
+                {"role": "system", "content": self.persona},
+                {"role": "user", "content": user_content},
+            ]
             input_ids = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=True,
@@ -50,14 +50,14 @@ class ConsistentLLMSimulator(BaseIntervieweeSimulator):
                 add_generation_prompt=True,
             )
 
-            if input_ids.shape[1]+1024 <= 8192: # assuming model max position is 8192
+            if input_ids.shape[1] + 1024 <= 8192:  # assuming model max position is 8192
                 break
-            
+
             self.history = self.history[2:]  # drop the oldest message
-            
+
         res = get_completion(
             model=self.simulator_model,
-            messages=[{"role":"system", "content": self.persona}, {"role":"user", "content": input_message}],
+            messages=messages,
             reasoning_effort="low",
             api_base=f"http://{self.host}:{self.port}/v1",
             max_tokens=1024

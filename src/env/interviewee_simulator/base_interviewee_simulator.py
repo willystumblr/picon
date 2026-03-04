@@ -62,7 +62,7 @@ class BaseIntervieweeSimulator:
                 return_tensors="pt",
                 add_generation_prompt=True,
             )
-            return input_ids.shape[1]
+            return input_ids.shape[1]+1024
         else:
             return self.tokenizer(model=self.client_or_model, messages=messages)
 

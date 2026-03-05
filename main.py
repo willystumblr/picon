@@ -310,9 +310,10 @@ if __name__ == "__main__":
     elif args.baseline_name == "consistent_llm":
         dataset = read_jsonl("src/env/personas/consistent_llm_personas.jsonl")
         if args.do_sample:
-            import random
-            random.seed(args.seed)
-            dataset = random.sample(dataset, k=15)
+            # import random
+            # random.seed(args.seed)
+            # dataset = random.sample(dataset, k=10)
+            dataset = dataset[:10]
         for data in dataset:
             interviewee_kwargs.append({
                 "baseline_name": "consistent_llm",

@@ -35,12 +35,13 @@ def get_chat_model(model: str, temperature: float = 0.0, api_key: str = None):
             temperature=temperature
         )
     else:  # Gemini models
+        model = model.split("/")[-1]
         return ChatGoogleGenerativeAI(
-            google_api_key=api_key or os.environ.get('GOOGLE_API_KEY'),
+            google_api_key=api_key or os.environ.get('GEMINI_API_KEY'),
             model=model,
             temperature=temperature,
             # Disable Automatic Function Calling (AFC)
-            additional_kwargs={
+            model_kwargs={
                 "tool_config": {
                     "function_calling_config": {
                         "mode": "NONE"
@@ -56,8 +57,9 @@ MODEL_PRICING = {
     "gpt-4o": {"input": 2.50, "output": 10.00},
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     # Gemini models
-    "gemini-2.5-flash": {"input": 0.30, "output": 2.5},
-    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},  # estimated
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+    "gemini-3-flash-preview": {"input": 0.50, "output": 3.00},
 }
 
 

@@ -1,6 +1,7 @@
 from PyCharacterAI import get_client
 from PyCharacterAI.exceptions import SessionClosedError
 import asyncio
+import threading
 from src.env.interviewee_simulator.base_interviewee_simulator import BaseIntervieweeSimulator
 from src.utils import get_completion
 from src.schemas import Action, IntervieweeResponse
@@ -10,13 +11,6 @@ import time
 
 CAI_TIMEOUT = 30  # seconds
 
-def _run_async(coro):
-    """Run an async coroutine in a fresh event loop (thread-safe)."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
 
 class CharacterAISimulator(BaseIntervieweeSimulator):
     def __init__(self, **kwargs):
@@ -27,8 +21,15 @@ class CharacterAISimulator(BaseIntervieweeSimulator):
         self.char_id = kwargs['character_id']
         self.user_id = kwargs['user_id']
 
+        # Create a persistent event loop running in a background thread.
+        # The PyCharacterAI client binds its aiohttp session to the loop it
+        # was created on, so we must reuse the same loop for all operations.
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._loop_thread.start()
+
         try:
-            _run_async(self._setup_client_and_chat(kwargs['user_id'], kwargs['character_id']))
+            self._run_on_loop(self._setup_client_and_chat(kwargs['user_id'], kwargs['character_id']))
             assert self.chat_id is not None, "Chat ID must be set after setup"
             logging.info(f"CharacterAI client and chat session established. Chat ID: {self.chat_id}")
         except SessionClosedError as e:
@@ -36,11 +37,16 @@ class CharacterAISimulator(BaseIntervieweeSimulator):
             self.client_or_model = None
             self.chat_id = None
 
+    def _run_on_loop(self, coro, timeout=CAI_TIMEOUT):
+        """Submit a coroutine to the persistent event loop and wait for the result."""
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
+
     def _get_response(self, message: str) -> IntervieweeResponse:
         time.sleep(0.5)  # 500ms delay
 
-        response = _run_async(
-            asyncio.wait_for(
+        async def _send():
+            return await asyncio.wait_for(
                 self.client_or_model.chat.send_message(
                     character_id=self.char_id,
                     chat_id=self.chat_id,
@@ -48,7 +54,8 @@ class CharacterAISimulator(BaseIntervieweeSimulator):
                 ),
                 timeout=CAI_TIMEOUT
             )
-        )
+
+        response = self._run_on_loop(_send(), timeout=CAI_TIMEOUT + 5)
         response = response.get_primary_candidate().text
 
         self._ai_check(message, response)
@@ -82,6 +89,19 @@ class CharacterAISimulator(BaseIntervieweeSimulator):
             await self.client_or_model.close_session()
             self.client_or_model = None
             self.chat_id = None
+
+    def shutdown(self):
+        """Close the client session and stop the persistent event loop."""
+        try:
+            if hasattr(self, '_loop') and self._loop.is_running():
+                self._run_on_loop(self.close(), timeout=CAI_TIMEOUT)
+        except Exception as e:
+            logging.warning(f"Error closing CharacterAI session: {e}")
+        finally:
+            if hasattr(self, '_loop') and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            if hasattr(self, '_loop_thread'):
+                self._loop_thread.join(timeout=5)
 
     def calculate_cost(self) -> float:
         # CharacterAI does not provide cost details, so we return 0.0 here.

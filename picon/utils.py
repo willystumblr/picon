@@ -45,8 +45,21 @@ def write_jsonl(data: List[Any], file_path: str) -> None:
         for item in data:
             f.write(json.dumps(item) + "\n")
 
+def _is_claude_family(model: str) -> bool:
+    m = model.lower()
+    return (
+        m.startswith("claude-")
+        or m.startswith("anthropic/")
+        or "anthropic.claude" in m
+        or "claude-" in m.split("/")[-1]
+    )
+
+
 def get_completion(model: str, messages: list, temperature: float = 1.0, max_retries=3, **kwargs):
     litellm.drop_params = True
+    if _is_claude_family(model):
+        kwargs.pop("reasoning_effort", None)
+        kwargs.pop("thinking", None)
     for attempt in range(1, max_retries+1):
         try:
             response = completion(
@@ -69,7 +82,7 @@ def get_completion(model: str, messages: list, temperature: float = 1.0, max_ret
 def setup_logging(log_to_file: bool, process_name: str = None):
     if log_to_file:
         os.makedirs(f'logs/{time.strftime("%Y-%m-%d")}', exist_ok=True)
-        log_filename = f'logs/{time.strftime("%Y-%m-%d")}/{process_name}_{time.strftime("%Y-%m-%d_%H-%M-%S")}.log'
+        log_filename = f'logs/{time.strftime("%Y-%m-%d")}/{process_name}_{time.strftime("%Y-%m-%d_%H-%M-%S")}_{os.getpid()}.log'
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s  %(levelname)s  %(message)s',

@@ -80,7 +80,6 @@ class GenericAgentSimulator(BaseIntervieweeSimulator):
         call_kwargs = {
             "model": self.client_or_model,
             "messages": self.history,
-            "reasoning_effort": "low",
         }
         if self.api_base:
             call_kwargs["api_base"] = self.api_base

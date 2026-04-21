@@ -5,6 +5,7 @@ Usage:
     python servers/human_simulacra_server.py --port 8002 --character_name "Mary Jones" --model gemini/gemini-2.5-flash
 """
 import argparse
+import asyncio
 import logging
 import time
 
@@ -12,7 +13,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 
-# Add project root to path for imports
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -23,10 +23,24 @@ logging.basicConfig(level=logging.INFO)
 app = FastAPI()
 
 agent = None
+character_name = ""  
+model_name = ""      
+
+@app.get("/")
+async def root():
+    return {"status": "ok", "character_name": character_name, "model": model_name}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
+    if agent is None:
+        return JSONResponse(status_code=503, content={"error": "Agent not initialized"})
+
     body = await request.json()
     messages = body.get("messages", [])
     if not messages:
@@ -35,7 +49,9 @@ async def chat_completions(request: Request):
     user_message = messages[-1].get("content", "")
 
     try:
-        content = agent.send_message(user_message)
+        content = await asyncio.get_event_loop().run_in_executor(
+            None, agent.send_message, user_message
+        )
     except Exception as e:
         logging.error(f"HumanSimulacra error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -56,7 +72,6 @@ async def chat_completions(request: Request):
 
 @app.get("/v1/cost")
 async def get_cost():
-    """Retrieve accumulated cost from the agent."""
     return {"cost": agent.calculate_cost() if agent else 0.0}
 
 
@@ -66,6 +81,9 @@ if __name__ == "__main__":
     parser.add_argument("--character_name", type=str, required=True)
     parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash")
     args = parser.parse_args()
+
+    character_name = args.character_name
+    model_name = args.model
 
     logging.info(f"Loading HumanSimulacra agent: {args.character_name}")
     agent = Top_agent(character_name=args.character_name, model=args.model)

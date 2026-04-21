@@ -1,20 +1,12 @@
-"""
-CharacterAI wrapping server — exposes Character.AI as an OpenAI-compatible endpoint.
-
-Usage:
-    python servers/characterai_server.py --port 8001 --character_id <id> --user_id <id>
-"""
 import argparse
 import asyncio
 import logging
 import time
-import threading
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 from PyCharacterAI import get_client
-from PyCharacterAI.exceptions import SessionClosedError
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()
@@ -22,16 +14,17 @@ app = FastAPI()
 CAI_TIMEOUT = 30
 client = None
 chat_id = None
-_loop = None
+character_id = None 
 
 
-async def setup_client(user_id: str, character_id: str):
-    global client, chat_id
+async def setup_client(user_id: str, char_id: str):
+    global client, chat_id, character_id
+    character_id = char_id
     client = await asyncio.wait_for(get_client(user_id), timeout=CAI_TIMEOUT)
     _, (chat, _) = await asyncio.wait_for(
         asyncio.gather(
             client.account.fetch_me(),
-            client.chat.create_chat(character_id),
+            client.chat.create_chat(char_id),
         ),
         timeout=CAI_TIMEOUT,
     )
@@ -39,9 +32,14 @@ async def setup_client(user_id: str, character_id: str):
     logging.info(f"CharacterAI session established. chat_id={chat_id}")
 
 
-def run_on_loop(coro, timeout=CAI_TIMEOUT):
-    future = asyncio.run_coroutine_threadsafe(coro, _loop)
-    return future.result(timeout=timeout)
+@app.get("/")
+async def root():
+    return {"status": "ok", "chat_id": chat_id}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.post("/v1/chat/completions")
@@ -53,20 +51,19 @@ async def chat_completions(request: Request):
 
     user_message = messages[-1].get("content", "")
 
-    async def _send():
-        return await asyncio.wait_for(
+    try:
+        await asyncio.sleep(0.5) 
+        response = await asyncio.wait_for(
             client.chat.send_message(
-                character_id=args.character_id,
+                character_id=character_id,
                 chat_id=chat_id,
                 text=user_message,
             ),
             timeout=CAI_TIMEOUT,
         )
-
-    try:
-        time.sleep(0.5)
-        response = run_on_loop(_send(), timeout=CAI_TIMEOUT + 5)
         content = response.get_primary_candidate().text
+    except asyncio.TimeoutError:
+        return JSONResponse(status_code=504, content={"error": "CharacterAI timeout"})
     except Exception as e:
         logging.error(f"CharacterAI error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -92,8 +89,10 @@ if __name__ == "__main__":
     parser.add_argument("--user_id", type=str, required=True)
     args = parser.parse_args()
 
-    _loop = asyncio.new_event_loop()
-    threading.Thread(target=_loop.run_forever, daemon=True).start()
+    async def main():
+        await setup_client(args.user_id, args.character_id)
+        config = uvicorn.Config(app, host="0.0.0.0", port=args.port)
+        server = uvicorn.Server(config)
+        await server.serve()
 
-    run_on_loop(setup_client(args.user_id, args.character_id))
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    asyncio.run(main())

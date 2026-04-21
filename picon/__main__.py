@@ -48,6 +48,11 @@ def parse_args():
     # Other configurations
     parser.add_argument('--num_turns', type=int, default=None)
     parser.add_argument('--num_sessions', type=int, default=None)
+    parser.add_argument('--num_get_to_know_q', type=int, default=10,
+                        help='Number of questions per combination used in get_to_know / repeat phases.')
+    parser.add_argument('--num_combs', type=int, default=1,
+                        help='Number of question combinations to run as separate sessions. '
+                             'When >= 2, num_sessions is forced to 1.')
     parser.add_argument('--question_seed', type=int, default=42)
     parser.add_argument('--log_to_file', action='store_true')
     # Prompt paths

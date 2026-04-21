@@ -22,6 +22,7 @@ from litellm.cost_calculator import completion_cost
 import os
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
+from itertools import combinations
 import random
 import asyncio
 from picon.env.interviewee_simulator.simulator_factory import get_interviewee_simulator
@@ -63,12 +64,29 @@ class InterrogationEnv:
                 self.agents['web_search'].tools = [tool.get_info() for tool in self.tools.values()]
             
             self.baseline_name = baseline_name
+
+            num_get_to_know_q = kwargs.pop('num_get_to_know_q', 1)
+            num_combs = kwargs.pop('num_combs', 1)
             self.interviewee_kwargs = kwargs
-            
+
             self.max_turns = max_turns
             questions = read_json(question_path or get_question_path())
             local_rng.shuffle(questions)
             self.predefined_questions = questions
+            if num_get_to_know_q < 1 or num_get_to_know_q > len(questions):
+                raise ValueError(
+                    f"num_get_to_know_q={num_get_to_know_q} must be in [1, {len(questions)}]."
+                )
+            all_combs = list(combinations(questions, num_get_to_know_q))
+            local_rng.shuffle(all_combs)
+            if num_combs > len(all_combs):
+                logging.warning(
+                    f"num_combs={num_combs} exceeds total combinations ({len(all_combs)}); "
+                    f"using all {len(all_combs)}."
+                )
+                num_combs = len(all_combs)
+            self.question_combinations = [list(c) for c in all_combs[:num_combs]]
+            self.active_questions = self.question_combinations[0]
             _inst_path = instruction_path or str(resources.files("picon.env").joinpath("interrogation_instruct.txt"))
             self.instruction = open(_inst_path).read()
             self.confirmation_prompt = open(get_prompt_path("confirmation_prompt.txt")).read()
@@ -88,6 +106,21 @@ class InterrogationEnv:
         """Shut down the shared thread pool."""
         if hasattr(self, '_executor'):
             self._executor.shutdown(wait=False)
+
+    def set_active_combination(self, comb_idx: int):
+        """Select which question combination to use for the next session(s)."""
+        if not hasattr(self, 'question_combinations'):
+            raise RuntimeError("Environment has no question_combinations (result_data mode?).")
+        if comb_idx < 0 or comb_idx >= len(self.question_combinations):
+            raise IndexError(
+                f"comb_idx={comb_idx} out of range "
+                f"[0, {len(self.question_combinations)})."
+            )
+        self.active_questions = self.question_combinations[comb_idx]
+        logging.info(
+            f"[COMBINATION] Using combination {comb_idx + 1}/{len(self.question_combinations)}: "
+            f"{[q['id'] for q in self.active_questions]}"
+        )
 
     def invoke_tool(self, action: Action) -> Observation | None:
         if action.action_type == "tool_call":
@@ -179,8 +212,8 @@ class InterrogationEnv:
         response = self.interviewee.get_response(self.instruction)
         logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
 
-        # Run predefined questions
-        for i, q in enumerate(self.predefined_questions):
+        # Run the active combination of predefined questions
+        for i, q in enumerate(self.active_questions):
             logging.info(f"[QUESTION] {q['question']}")
             response = self.interviewee.get_response(q['question'])
             logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
@@ -366,7 +399,7 @@ class InterrogationEnv:
 
     def finalize(self):
         """repeat stage: repeat the pre-defined questions to check for consistency"""
-        for i, q in enumerate(self.predefined_questions):
+        for i, q in enumerate(self.active_questions):
             logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
             response = self.interviewee.get_response(f"Just to clarify, {q['question']}")
             logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")

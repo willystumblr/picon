@@ -242,6 +242,8 @@ def run_interview(
     output_dir: str = None,
     question_file_path: str = None,
     question_seed: int = 42,
+    num_get_to_know_q: int = 10,
+    num_combs: int = 1,
     **kwargs,
 ) -> dict:
     """Run interview sessions for a single persona.
@@ -265,6 +267,15 @@ def run_interview(
     if output_dir:        cfg["output_dir"]        = output_dir
     if num_turns:         cfg["num_turns"]         = num_turns
     if num_sessions:      cfg["num_sessions"]      = num_sessions
+
+    cfg["num_get_to_know_q"] = num_get_to_know_q
+    cfg["num_combs"]         = num_combs
+    if cfg["num_combs"] >= 2 and cfg["num_sessions"] != 1:
+        logging.info(
+            f"num_combs={cfg['num_combs']} >= 2; forcing num_sessions=1 "
+            f"(was {cfg['num_sessions']})."
+        )
+        cfg["num_sessions"] = 1
 
     if persona and os.path.isfile(persona):
         with open(persona) as f:
@@ -347,24 +358,40 @@ def run_interview(
             tools=tools,
             max_turns=cfg["num_turns"],
             question_path=question_file_path or get_question_path(),
+            num_get_to_know_q=cfg["num_get_to_know_q"],
+            num_combs=cfg["num_combs"],
             **interviewee_kwargs,
         )
 
-        reset_only = False
         histories = []
-        for session_idx in range(cfg["num_sessions"]):
-            logging.info(f"Starting session {session_idx + 1}/{cfg['num_sessions']} for: {name}")
-            env.reset(reset_only=reset_only)
-            if not reset_only:
-                done = False
-                while not done:
-                    state, done = env.step()
-                state = env.finalize()
-            session_result = env.save_state()
-            histories.append(env.state.history)
-            results_complete[f"session_{session_idx + 1}"] = session_result
-            persona_stats["sessions_completed"] += 1
-            reset_only = True
+        total_session_idx = 0
+        for comb_idx in range(cfg["num_combs"]):
+            env.set_active_combination(comb_idx)
+            # Between combinations, clear agent memory so sessions are independent
+            if comb_idx > 0:
+                for agent in env.agents.values():
+                    agent.reset()
+
+            reset_only = False
+            for session_idx in range(cfg["num_sessions"]):
+                total_session_idx += 1
+                logging.info(
+                    f"Starting comb {comb_idx + 1}/{cfg['num_combs']}, "
+                    f"session {session_idx + 1}/{cfg['num_sessions']} for: {name}"
+                )
+                env.reset(reset_only=reset_only)
+                if not reset_only:
+                    done = False
+                    while not done:
+                        state, done = env.step()
+                    state = env.finalize()
+                session_result = env.save_state()
+                session_result["combination_idx"] = comb_idx
+                session_result["combination_questions"] = [q["id"] for q in env.active_questions]
+                histories.append(env.state.history)
+                results_complete[f"session_{total_session_idx}"] = session_result
+                persona_stats["sessions_completed"] += 1
+                reset_only = True
 
         results_complete["agents_memory"] = {n: agent.memory for n, agent in env.agents.items()}
         write_json(results_complete, result_path)

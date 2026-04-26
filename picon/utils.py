@@ -5,6 +5,7 @@ import logging
 import time
 import select
 import sys
+import inspect
 import litellm
 from litellm import completion
 try:
@@ -55,11 +56,28 @@ def _is_claude_family(model: str) -> bool:
     )
 
 
+def _identify_caller() -> str:
+    try:
+        frame = inspect.currentframe().f_back.f_back
+        if frame is None:
+            return "unknown"
+        info = inspect.getframeinfo(frame)
+        module = os.path.basename(info.filename)
+        cls = ""
+        self_obj = frame.f_locals.get("self")
+        if self_obj is not None:
+            cls = type(self_obj).__name__ + "."
+        return f"{module}:{cls}{info.function}"
+    except Exception:
+        return "unknown"
+
+
 def get_completion(model: str, messages: list, temperature: float = 1.0, max_retries=3, **kwargs):
     litellm.drop_params = True
     if _is_claude_family(model):
         kwargs.pop("reasoning_effort", None)
         kwargs.pop("thinking", None)
+    caller = _identify_caller()
     for attempt in range(1, max_retries+1):
         try:
             response = completion(
@@ -71,12 +89,12 @@ def get_completion(model: str, messages: list, temperature: float = 1.0, max_ret
             assert response.choices and len(response.choices) > 0, f"Invalid response from completion API: No choices : {response}"
             return response
         except Exception as e:
-            logging.error(f"Error during completion: {e}")
+            logging.error(f"Error during completion [caller={caller}, model={model}, attempt={attempt}/{max_retries}]: {e}")
             wait_time = 30
-            logging.info(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time) 
-    logging.exception("Max retries reached. Raising exception.")
-    raise RuntimeError("Failed to get completion after multiple attempts.")
+            logging.info(f"Retrying in {wait_time} seconds [caller={caller}, model={model}]...")
+            time.sleep(wait_time)
+    logging.exception(f"Max retries reached [caller={caller}, model={model}]. Raising exception.")
+    raise RuntimeError(f"Failed to get completion after multiple attempts [caller={caller}, model={model}].")
 
 
 def setup_logging(log_to_file: bool, process_name: str = None):

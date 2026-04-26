@@ -6,14 +6,6 @@ import json
 import re
 
 
-def build_persona_hub_prompt(persona: str) -> str:
-    persona = persona[0].lower() + persona[1:] if len(persona) > 1 else persona.lower()
-    return (
-        f"You are {persona}\n\n"
-        "Please stay in your character and comply with the persona."
-        "Don't mention that you are an AI model."
-    )
-
 
 def build_twin_2k_500_prompt(persona_json: str) -> str:
     return (
@@ -43,13 +35,15 @@ def build_opencharacter_prompt(persona: str, profile: str) -> str:
     )
 
 
-def build_llm_generated_prompt(persona_data) -> str:
+def build_llm_generated_prompt(persona_data, persona_type: str="descriptive") -> str:
     """
     Build a comprehensive persona prompt from structured LLM-generated persona data.
     Based on the paper "LLM Generated Persona is a Promise with a Catch"
     (https://arxiv.org/abs/2503.16527)
+
+    persona_type: one of "descriptive", "subjective", "objective", "meta"
     """
-    persona_description = _build_persona_description(persona_data)
+    persona_description = _build_persona_description(persona_data, persona_type)
     return (
         "You are an AI assistant tasked with generating realistic opinions based on "
         "a given persona and a specific topic.\n\n"
@@ -83,14 +77,40 @@ def extract_llm_generated_name(persona_data) -> str:
     return "Anonymous Persona"
 
 
-def _build_persona_description(persona_data) -> str:
-    """Build persona description from structured data."""
+def _build_persona_description(persona_data, persona_type: str) -> str:
+    """Build persona description from structured data using the specified type."""
     if isinstance(persona_data, str):
         return persona_data
 
+    assert persona_type in ("descriptive", "subjective", "objective", "meta"), \
+        f"Invalid persona_type '{persona_type}'. Must be one of: descriptive, subjective, objective, meta"
+
     persona_parts = []
 
-    if "objective_table_persona" in persona_data:
+    if persona_type == "descriptive":
+        if "descriptive_persona" in persona_data:
+            persona_parts.append("LIFE STORY AND BACKGROUND:")
+            persona_parts.append(persona_data["descriptive_persona"])
+
+    elif persona_type == "subjective":
+        try:
+            subj_data = json.loads(persona_data["subjective_table_persona"])
+            if "BIG_FIVE_SCORES" in subj_data:
+                persona_parts.append("PERSONALITY TRAITS (Big Five):")
+                for trait, score in subj_data["BIG_FIVE_SCORES"].items():
+                    persona_parts.append(f"- {trait.title()}: {score}")
+            subjective_attrs = [
+                f"{key.replace('_', ' ').title()}: {value}"
+                for key, value in subj_data.items()
+                if key != "BIG_FIVE_SCORES" and value and value != ""
+            ]
+            if subjective_attrs:
+                persona_parts.append("PERSONAL ATTRIBUTES:")
+                persona_parts.append("\n".join(f"- {attr}" for attr in subjective_attrs))
+        except Exception:
+            pass
+
+    elif persona_type == "objective":
         try:
             obj_data = json.loads(persona_data["objective_table_persona"])
             demographics = [
@@ -104,29 +124,8 @@ def _build_persona_description(persona_data) -> str:
         except Exception:
             pass
 
-    if "descriptive_persona" in persona_data:
-        persona_parts.append("\nLIFE STORY AND BACKGROUND:")
-        persona_parts.append(persona_data["descriptive_persona"])
-
-    if "subjective_table_persona" in persona_data:
-        try:
-            subj_data = json.loads(persona_data["subjective_table_persona"])
-            if "BIG_FIVE_SCORES" in subj_data:
-                persona_parts.append("\nPERSONALITY TRAITS (Big Five):")
-                for trait, score in subj_data["BIG_FIVE_SCORES"].items():
-                    persona_parts.append(f"- {trait.title()}: {score}")
-            subjective_attrs = [
-                f"{key.replace('_', ' ').title()}: {value}"
-                for key, value in subj_data.items()
-                if key != "BIG_FIVE_SCORES" and value and value != ""
-            ]
-            if subjective_attrs:
-                persona_parts.append("\nPERSONAL ATTRIBUTES:")
-                persona_parts.append("\n".join(f"- {attr}" for attr in subjective_attrs))
-        except Exception:
-            pass
-
-    if "meta_persona" in persona_data:
-        persona_parts.append(f"\nMETA INFORMATION: {persona_data['meta_persona']}")
+    elif persona_type == "meta":
+        if "meta_persona" in persona_data:
+            persona_parts.append(f"META INFORMATION: {persona_data['meta_persona']}")
 
     return "\n".join(persona_parts)

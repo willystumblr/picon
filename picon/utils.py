@@ -78,6 +78,7 @@ def get_completion(model: str, messages: list, temperature: float = 1.0, max_ret
         kwargs.pop("reasoning_effort", None)
         kwargs.pop("thinking", None)
     caller = _identify_caller()
+    kwargs.setdefault("timeout", 120)
     for attempt in range(1, max_retries+1):
         try:
             response = completion(

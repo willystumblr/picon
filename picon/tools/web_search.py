@@ -163,9 +163,9 @@ class GoogleClaimSearch(BaseModel):
                     "mobile": False
                 }
             )
-            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
             page.raise_for_status()
-            
+
             # Check if the content is a PDF
             content_type = page.headers.get('Content-Type', '').lower()
             is_pdf = 'application/pdf' in content_type or url.lower().endswith('.pdf')
@@ -450,7 +450,7 @@ class SerperSearch(BaseModel):
             scraper = cloudscraper.create_scraper(
                 browser={"browser": "chrome", "platform": "windows", "mobile": False}
             )
-            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
             page.raise_for_status()
 
             content_type = page.headers.get('Content-Type', '').lower()
@@ -612,7 +612,7 @@ class TavilySearch(BaseModel):
             scraper = cloudscraper.create_scraper(
                 browser={"browser": "chrome", "platform": "windows", "mobile": False}
             )
-            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            page = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
             page.raise_for_status()
 
             content_type = page.headers.get('Content-Type', '').lower()

@@ -483,6 +483,11 @@ class SerperSearch(BaseModel):
                 json={"q": q, "gl": gl, "num": TOP_K_RESULTS},
                 timeout=10,
             )
+            if resp.status_code == 400:
+                logging.error(
+                    f"[SerperSearch] 400 Bad Request | q={q!r} gl={gl!r} "
+                    f"len(q)={len(q) if isinstance(q, str) else 'n/a'} | body={resp.text[:500]}"
+                )
             resp.raise_for_status()
             self.tool_call_counts += 1
             items = resp.json().get("organic", [])

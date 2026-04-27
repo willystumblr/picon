@@ -8,6 +8,8 @@ import os
 import json
 import time
 import threading
+import atexit
+import weakref
 from picon.agents.base_agent import Agent
 from picon.utils import get_completion
 from picon.schemas import Action, Observation, Turn, ToolOutput
@@ -72,6 +74,13 @@ class EvaluatorAgent(Agent):
         )
         self.affirmed_search_results = []  # Store affirmed search results for external consistency check
         self._executor = ThreadPoolExecutor(max_workers=4)
+        _self_ref = weakref.ref(self)
+        def _shutdown_executor():
+            inst = _self_ref()
+            if inst is not None:
+                inst._executor.shutdown(wait=False, cancel_futures=True)
+        atexit.register(_shutdown_executor)
+        self._atexit_hook = _shutdown_executor
         self.results_dict = {
             'internal': {
                 'score': {
@@ -128,6 +137,15 @@ class EvaluatorAgent(Agent):
                 }
             }
         }
+
+    def close(self) -> None:
+        self._executor.shutdown(wait=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
 
     def set_cutoff_date(self, cutoff_date: str) -> None:
         self.memory[0]['content'] = self.memory[0]['content'].format(cutoff_date=cutoff_date)
@@ -972,7 +990,10 @@ class EvaluatorAgent(Agent):
             tasks.append(('inter', lambda: self.inter_session_eval(histories)))
         
         if should_use_threading and len(tasks) > 1:
-            futures = [self._executor.submit(task[1]) for task in tasks]
+            def _run_in_thread(task_fn):
+                set_thread_context(True)
+                return task_fn()
+            futures = [self._executor.submit(_run_in_thread, task[1]) for task in tasks]
             for future in tqdm(futures, desc="Overall evaluation progress", total=len(futures)):
                 future.result()  # wait for all to complete
         else:

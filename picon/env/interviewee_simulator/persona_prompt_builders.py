@@ -5,7 +5,15 @@ Each function takes raw persona data and returns a formatted system prompt strin
 import json
 import re
 
-
+def build_nemotron_prompt(persona_data: dict) -> str:
+    del persona_data['uuid']
+    persona_prompt = ""
+    for k, v in persona_data.items():
+        persona_prompt += f"## {k}\n{v}\n\n"
+    return (
+        "You are roleplaying as the following person — stay fully in character throughout the conversation.\n"
+        f"{persona_prompt}"
+    )
 
 def build_twin_2k_500_prompt(persona_json: str) -> str:
     return (

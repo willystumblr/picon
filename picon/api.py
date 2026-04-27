@@ -304,7 +304,9 @@ def run_interview(
         "eval_internal_harmonic_mean": None,
         "eval_internal_responsiveness": None,
         "eval_internal_consistency": None,
-        "eval_external_wilson": None,
+        "eval_external_ec_score": None,
+        "eval_external_coverage": None,
+        "eval_external_non_refutation_rate": None,
         "eval_stability_inter_session": None,
         "eval_stability_intra_session": None,
     }
@@ -465,7 +467,9 @@ def run_evaluation(interview_result: dict, eval_factors: List[str] = None) -> di
             persona_stats["eval_internal_harmonic_mean"]  = internal_score.get("harmonic_mean")
             persona_stats["eval_internal_responsiveness"] = internal_score.get("responsiveness_score")
             persona_stats["eval_internal_consistency"]    = internal_score.get("consistency_score")
-            persona_stats["eval_external_wilson"]         = external_score.get("wilson_score")
+            persona_stats["eval_external_ec_score"]       = external_score.get("ec_score")
+            persona_stats["eval_external_coverage"]       = external_score.get("coverage")
+            persona_stats["eval_external_non_refutation_rate"]           = external_score.get("non_refutation_rate")
             persona_stats["eval_stability_inter_session"] = stability.get("inter_session", {}).get("score")
             persona_stats["eval_stability_intra_session"] = stability.get("intra_session", {}).get("score")
 

@@ -9,7 +9,7 @@ Example — OpenCharacter (LoRA on Llama-3-8B):
     # 1) Start vLLM with LoRA adapter on GPU 0,1
     CUDA_VISIBLE_DEVICES=0,1 vllm serve meta-llama/Meta-Llama-3-8B-Instruct \
         --enable-lora \
-        --lora-modules willystumblr/opencharacter-sft-2025-06-21_14-54-13 \
+        --lora-modules anonymous/opencharacter-sft-llama-3-8b \
         --tensor-parallel-size 1 \
         --served-model-name opencharacter-llama-3-8b-sft \
         --port 8000

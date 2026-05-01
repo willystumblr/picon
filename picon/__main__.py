@@ -65,6 +65,14 @@ def parse_args():
     parser.add_argument('--eval_factors', type=str, nargs='+', default=None,
                         choices=['internal', 'external', 'intra', 'inter'])
     parser.add_argument('--do_eval', action='store_true')
+    parser.add_argument('--eval_per_combination', action='store_true',
+                        help='Evaluate after each question combination and save a separate file per combination.')
+    parser.add_argument('--baseline_name', type=str, default=None,
+                        help='Simulator type. Defaults to "generic_agent". Use "consistent_llm" for ConsistentLLMSimulator.')
+    # Completion kwargs forwarded to the interviewee simulator
+    parser.add_argument('--agent_temperature', type=float, default=None)
+    parser.add_argument('--agent_top_p', type=float, default=None)
+    parser.add_argument('--agent_max_tokens', type=int, default=None)
 
     return parser.parse_args()
 
@@ -80,8 +88,20 @@ def main():
     logging.info(f"Target: {args.agent_name} @ {args.agent_api_base or 'litellm'} / {args.agent_model or '(default)'}")
 
     _skip = {"agent_api_base", "agent_api_key", "agent_model", "agent_name", "agent_persona",
-             "do_eval", "eval_factors", "log_to_file"}
+             "do_eval", "eval_per_combination", "eval_factors", "log_to_file",
+             "agent_temperature", "agent_top_p", "agent_max_tokens", "baseline_name"}
     interview_kwargs = {k: v for k, v in vars(args).items() if k not in _skip}
+    completion_kwargs = {}
+    if args.agent_temperature is not None: completion_kwargs["temperature"] = args.agent_temperature
+    if args.agent_top_p is not None:       completion_kwargs["top_p"]       = args.agent_top_p
+    if args.agent_max_tokens is not None:  completion_kwargs["max_tokens"]  = args.agent_max_tokens
+    if completion_kwargs:
+        interview_kwargs["completion_kwargs"] = completion_kwargs
+    if args.baseline_name:
+        interview_kwargs["baseline_name"] = args.baseline_name
+    if args.eval_per_combination:
+        interview_kwargs["eval_per_combination"] = True
+        interview_kwargs["eval_factors"] = args.eval_factors
     result = run_interview(
         name=args.agent_name,
         model=args.agent_model,
@@ -92,7 +112,7 @@ def main():
     )
     persona_stats = result["persona_stats"]
 
-    if args.do_eval and result["env"] is not None:
+    if args.do_eval and not args.eval_per_combination and result["env"] is not None:
         persona_stats = run_evaluation(result, eval_factors=args.eval_factors)
 
     # Save summary
@@ -123,7 +143,7 @@ def main():
     logging.info(f"Success: {persona_stats.get('success')}")
     logging.info(f"AI Detected: {persona_stats.get('ai_detected')}")
     logging.info(f"Duration: {persona_stats.get('duration_min', 0):.2f} min")
-    logging.info(f"Cost: ${persona_stats.get('total_cost', 0):.4f}")
+    logging.info(f"Cost: ${persona_stats.get('total_cost', 0):.4f} (eval: ${persona_stats.get('eval_cost', 0):.4f})")
     logging.info(f"Turns: {persona_stats.get('num_turns_completed', 0)}")
     logging.info(f"Summary saved to: {summary_path}")
     logging.info("=" * 60)

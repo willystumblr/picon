@@ -58,10 +58,9 @@ class BaseIntervieweeSimulator:
             input_ids = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=True,
-                return_tensors="pt",
                 add_generation_prompt=True,
             )
-            return input_ids.shape[1]+1024
+            return len(input_ids)
         else:
             return self.tokenizer(model=self.client_or_model, messages=messages)
 
@@ -69,7 +68,7 @@ class BaseIntervieweeSimulator:
         """
         when the history is too long (> self.max_tokens), we need to truncate the history to fit the max tokens limit of the model
         """
-        while self._count_tokens(self.history) > self.max_tokens and len(self.history) > 2:
+        while self._count_tokens(self.history) > self.max_tokens - 1152 and len(self.history) > 2:
             # Remove the oldest non-system message pair ([1] and [2]) to preserve the system prompt at [0]
             self.history.pop(1)
             self.history.pop(1)

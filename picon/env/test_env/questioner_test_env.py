@@ -430,7 +430,7 @@ if __name__ == "__main__":
                 continue
             interviewee_kwargs.append({
                 "baseline_name": "opencharacter",
-                "model_path": "willystumblr/opencharacter-sft-2025-06-21_14-54-13",
+                "model_path": "anonymous/opencharacter-sft-llama-3-8b",
                 "persona": data['persona'],
                 "profile": data['character'],
                 "name": name_match.group(1).strip(),

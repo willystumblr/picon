@@ -34,7 +34,7 @@ print(picon.__version__)
 
 For development or full extras (CharacterAI, Google GenAI, etc.):
 ```bash
-git clone https://github.com/willystumblr/picon.git
+git clone https://github.com/anonymous/picon.git
 cd picon
 pip install -e ".[all]"
 ```
@@ -329,6 +329,49 @@ See [`examples/`](examples/) for full end-to-end scripts with vLLM + LoRA and Hu
 
 &nbsp;
 
+## Reproducibility
+
+To reproduce full benchmark results, run each agent's script after setting the required API keys in `.env`:
+
+```bash
+# 1. Install
+pip install -e ".[all]"
+
+# 2. Set API keys
+cp .env.example .env
+# Edit .env with your keys
+
+# 3. Run each benchmark agent
+bash scripts/nemotron.sh
+bash scripts/twin_2k_500.sh
+bash scripts/llm_generated.sh
+bash scripts/deeppersona.sh        # requires: DATASET_DIR=/path/to/deeppersona
+bash scripts/human_simulacra.sh   # wrapping server auto-started per character
+
+# OpenCharacter: serve your OpenCharacter-compatible model via vLLM first
+vllm serve <your-opencharacter-model> --port 8000
+VLLM_BASE=http://localhost:8000/v1 VLLM_MODEL=<your-opencharacter-model> bash scripts/opencharacter.sh
+
+# ConsistentLLM: requires fine-tuned model served via vLLM first
+vllm serve anonymous/consistent_llm_llama-8b-sft-ppo-prompt --port 8001
+bash scripts/consistent_llm.sh    # SIMULATOR_PORT=8001 by default
+
+# Character.AI (requires CAI_TOKEN in .env):
+bash scripts/characterai.sh
+```
+
+All scripts write results to `data/results/` and evaluation scores to `data/evaluation/`.
+By default, each script randomly samples 10 personas (`SAMPLE_N=10`, `SEED=42`).
+To run all personas without sampling, set `SAMPLE_N=0`:
+
+```bash
+SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
+```
+
+&nbsp;
+
+&nbsp;
+
 ## How It Works
 
 ```
@@ -414,8 +457,79 @@ See [`examples/`](examples/) for full end-to-end scripts with vLLM + LoRA and Hu
 | **External Coverage** | Fraction of turns containing at least one verifiable claim |
 | **External Non-refutation Rate** | Per-turn rate of claims not refuted by web evidence |
 | **External Consistency (EC)** | Harmonic mean of Coverage and Non-refutation Rate |
-| **Inter-session Stability** | Answer stability across sessions |
-| **Intra-session Stability** | Answer stability within a session |
+| **Retest Consistency (Inter)** | Answer stability across sessions |
+| **Retest Consistency (Intra)** | Answer stability within a session |
+
+&nbsp;
+
+&nbsp;
+
+## Supported Persona Agent Types
+
+PICON includes ready-to-run scripts for eight established persona agent types.
+Each script handles data loading, prompt construction, parallel execution, and evaluation in one command.
+
+| Agent Type | Data Source | Script |
+|-----------|------------|--------|
+| **Human Simulacra** | 11 RAG-based characters (local) | `scripts/human_simulacra.sh` |
+| **OpenCharacter** | [`xywang1/OpenCharacter`](https://huggingface.co/datasets/xywang1/OpenCharacter) (HuggingFace) | `scripts/opencharacter.sh` |
+| **Character.AI** | `picon/env/personas/characterai.json` (10 characters) | `scripts/characterai.sh` |
+| **Nemotron** | `nvidia/Nemotron-Personas-*` — 7 regions (HuggingFace) | `scripts/nemotron.sh` |
+| **DeepPersona** | Local JSON profile files | `scripts/deeppersona.sh` |
+| **Twin-2K-500** | [`LLM-Digital-Twin/Twin-2K-500`](https://huggingface.co/datasets/LLM-Digital-Twin/Twin-2K-500) (HuggingFace) | `scripts/twin_2k_500.sh` |
+| **LLM-Generated** | [`Tianyi-Lab/Personas`](https://huggingface.co/datasets/Tianyi-Lab/Personas) (HuggingFace) | `scripts/llm_generated.sh` |
+| **ConsistentLLM** | `picon/env/personas/consistent_llm_personas.jsonl` (local) | `scripts/consistent_llm.sh` |
+
+### Running evaluation scripts
+
+All scripts share the same environment variable interface:
+
+```bash
+# Run with default settings (random sample of 10 personas)
+bash scripts/nemotron.sh
+
+# Control sample size and seed
+SAMPLE_N=10 SEED=42 bash scripts/twin_2k_500.sh
+
+# Run all personas (no sampling)
+SAMPLE_N=0 bash scripts/llm_generated.sh
+
+# Control parallelism
+MAX_PARALLEL=3 bash scripts/opencharacter.sh
+```
+
+> [!NOTE]
+> **Human Simulacra** automatically starts a wrapping server per character — no manual setup needed. Control the simulator model with `SIMULATOR_MODEL`.
+>
+> **OpenCharacter** requires a vLLM server running an OpenCharacter-compatible model. Serve your model first, then point `VLLM_BASE` and `VLLM_MODEL` to it:
+> ```bash
+> vllm serve <your-opencharacter-model> --port 8000
+> VLLM_BASE=http://localhost:8000/v1 VLLM_MODEL=<your-opencharacter-model> bash scripts/opencharacter.sh
+> ```
+>
+> **Character.AI** requires `CAI_TOKEN` set in your `.env` file.
+>
+> **DeepPersona** requires setting `DATASET_DIR` to your local data path:
+> ```bash
+> DATASET_DIR=/path/to/deeppersona bash scripts/deeppersona.sh
+> ```
+>
+> **ConsistentLLM** requires a fine-tuned model served via vLLM. Use `SIMULATOR_PORT` and `SIMULATOR_MODEL` to point to the running server:
+> ```bash
+> vllm serve anonymous/consistent_llm_llama-8b-sft-ppo-prompt --port 8001
+> bash scripts/consistent_llm.sh
+> # or with a custom model:
+> vllm serve <model_path> --port 8002
+> SIMULATOR_PORT=8002 SIMULATOR_MODEL=hosted_vllm/<model_path> bash scripts/consistent_llm.sh
+> ```
+>
+> **LLM-Generated** supports four persona representation styles via `PERSONA_TYPE`:
+> ```bash
+> PERSONA_TYPE=descriptive bash scripts/llm_generated.sh   # default
+> PERSONA_TYPE=objective   bash scripts/llm_generated.sh
+> PERSONA_TYPE=subjective  bash scripts/llm_generated.sh
+> PERSONA_TYPE=meta        bash scripts/llm_generated.sh
+> ```
 
 &nbsp;
 
@@ -426,12 +540,34 @@ See [`examples/`](examples/) for full end-to-end scripts with vLLM + LoRA and Hu
 End-to-end scripts in [`examples/`](examples/):
 
 ```bash
+# Custom persona or HuggingFace dataset (Nemotron, Twin-2K-500, LLM-Generated)
+python examples/quickstart_llm_persona.py                     # custom persona (no external deps)
+python examples/quickstart_llm_persona.py --source nemotron   # nvidia/Nemotron-Personas-USA
+python examples/quickstart_llm_persona.py --source twin       # LLM-Digital-Twin/Twin-2K-500
+python examples/quickstart_llm_persona.py --source llm_generated  # Tianyi-Lab/Personas
+python examples/quickstart_llm_persona.py --source custom --do_eval
+
 # OpenCharacter (vLLM + LoRA)
 python examples/test_opencharacter_vllm.py
 
 # HumanSimulacra (RAG agent)
 python examples/test_human_simulacra.py
 python examples/test_human_simulacra.py --character "Kevin Kelly" --model "gpt-5"
+
+# Character.AI (requires CAI_TOKEN)
+CAI_TOKEN=<your_token> python examples/test_characterai.py
+CAI_TOKEN=<your_token> python examples/test_characterai.py \
+    --character_name "Albert Einstein" --character_id <char_id>
+
+# ConsistentLLM (requires vLLM server running separately)
+# First: vllm serve <model_path> --port 8001
+python examples/test_consistent_llm.py \
+    --model_path anonymous/consistent_llm_llama-8b-sft-ppo-prompt \
+    --vllm_port 8001
+python examples/test_consistent_llm.py \
+    --model_path anonymous/consistent_llm_llama-8b-sft-ppo-prompt \
+    --vllm_port 8001 \
+    --personas_file picon/env/personas/consistent_llm_personas.jsonl
 ```
 
 &nbsp;
@@ -443,10 +579,10 @@ python examples/test_human_simulacra.py --character "Kevin Kelly" --model "gpt-5
 If you use PICON in your research, please cite:
 
 ```bibtex
-@article{kim2026picon,
+@article{anonymous2026picon,
   title={PICON: A Multi-Turn Interrogation Framework for Evaluating Persona Agent Consistency},
-  author={Kim, Minseo and Im, Sujeong and Choi, Junseong and Lee, Junhee and Shim, Chaeeun and Choi, Edward},
-  journal={arXiv preprint arXiv:2603.25620},
+  author={Anonymous},
+  journal={arXiv preprint},
   year={2026}
 }
 ```

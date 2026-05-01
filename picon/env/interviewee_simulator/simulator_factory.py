@@ -3,11 +3,7 @@ from picon.env.interviewee_simulator.generic_agent_simulator import GenericAgent
 
 
 def get_interviewee_simulator(baseline_name: str, **kwargs) -> BaseIntervieweeSimulator:
-    """
-    Unified factory: all baselines route to GenericAgentSimulator.
-
-    The caller (main.py) is responsible for constructing the appropriate kwargs
-    (persona, api_base, model, user_message_template, completion_kwargs, etc.)
-    before calling this factory.
-    """
+    if baseline_name == "consistent_llm":
+        from picon.env.interviewee_simulator.consistent_llm_simulator import ConsistentLLMSimulator
+        return ConsistentLLMSimulator(**kwargs)
     return GenericAgentSimulator(**kwargs)

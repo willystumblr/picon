@@ -1,0 +1,14 @@
+[
+    {
+        "id": "Q_1",
+        "question": "What best describes your current main activity or status? (e.g., Paid employment (incl. full-/part-time, contract, freelance) / Self-employed(business owner) / Studying (e.g., student, apprenticeship) / Caregiving(homemaking) / Looking for work / Not seeking work / Retired / Not working due to health or other reasons / Other (please specify))"
+    },
+    {
+        "id": "Q_2",
+        "question": "Which field(s) are your primary area(s) of work, study, or regular activities? (e.g., Education / Healthcare / IT, Software / Manufacturing, Engineering / Customer Service, Sales / Public Sector, Government, Nonprofit/ Arts, Media, Design / Finance, Law, Consulting / Services, Transportation, Logistics / Agriculture, Forestry, Fisheries / Caregiving, Domestic work / Other (please specify))"
+    },
+    {
+        "id": "Q_3",
+        "question": "What is the highest educational level attained by you?"
+    }
+]

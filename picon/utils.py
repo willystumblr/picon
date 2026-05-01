@@ -383,7 +383,7 @@ def upload_to_github(filepath, content):
     logging.info(f"Attempting GitHub upload with token: {token[:8]}...{token[-4:] if len(token) > 12 else ''}")
     
     g = Github(token)
-    repo = g.get_repo("sujeongim/real_human_interview")
+    repo = g.get_repo(os.getenv("GITHUB_REPO", "anonymous/real_human_interview"))
     try:
         # Ensure filepath ends with .json
         if not filepath.endswith('.json'):
@@ -410,7 +410,7 @@ def upload_to_github(filepath, content):
         
 def download_from_github(filepath):
     g = Github(os.getenv("GITHUB_TOKEN"))
-    repo = g.get_repo("sujeongim/real_human_interview")
+    repo = g.get_repo(os.getenv("GITHUB_REPO", "anonymous/real_human_interview"))
     try:
         # .json 확장자 자동 추가
         if not filepath.endswith('.json'):

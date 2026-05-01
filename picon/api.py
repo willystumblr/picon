@@ -24,6 +24,7 @@ Usage:
 from dataclasses import dataclass, field
 from typing import Optional, List
 import os
+import glob
 import time
 import logging
 
@@ -173,6 +174,9 @@ def run(
         if do_eval:
             logging.info(f"Running evaluation for {name}...")
             eval_result = env.evaluate(histories, eval_factors=eval_factors)
+            eval_cost = agents["evaluator"].cost
+            persona_stats["eval_cost"] = eval_cost
+            persona_stats["total_cost"] += eval_cost
             results_complete["evaluation"] = eval_result
             write_json(results_complete, result_path)
 
@@ -244,6 +248,8 @@ def run_interview(
     question_seed: int = 42,
     num_get_to_know_q: int = 10,
     num_combs: int = 1,
+    eval_per_combination: bool = False,
+    eval_factors: List[str] = None,
     **kwargs,
 ) -> dict:
     """Run interview sessions for a single persona.
@@ -369,11 +375,25 @@ def run_interview(
         total_session_idx = 0
         for comb_idx in range(cfg["num_combs"]):
             env.set_active_combination(comb_idx)
+
+            # Skip this combination if a result file for its q_ids already exists
+            if eval_per_combination:
+                import glob as _glob
+                q_ids = "_".join(q["id"] for q in env.active_questions)
+                existing = _glob.glob(
+                    f"{cfg['output_dir']}/{name}/{name.replace(' ', '_')}_{q_ids}_*.json"
+                )
+                if existing:
+                    logging.info(f"Skipping comb {comb_idx + 1} ({q_ids}): result file already exists.")
+                    continue
+
             # Between combinations, clear agent memory so sessions are independent
             if comb_idx > 0:
                 for agent in env.agents.values():
                     agent.reset()
 
+            comb_histories = []
+            comb_results = {}
             reset_only = False
             for session_idx in range(cfg["num_sessions"]):
                 total_session_idx += 1
@@ -391,9 +411,24 @@ def run_interview(
                 session_result["combination_idx"] = comb_idx
                 session_result["combination_questions"] = [q["id"] for q in env.active_questions]
                 histories.append(env.state.history)
+                comb_histories.append(env.state.history)
                 results_complete[f"session_{total_session_idx}"] = session_result
+                comb_results[f"session_{session_idx + 1}"] = session_result
                 persona_stats["sessions_completed"] += 1
                 reset_only = True
+
+            if eval_per_combination:
+                comb_results["agents_memory"] = {n: agent.memory for n, agent in env.agents.items()}
+                q_ids = "_".join(q["id"] for q in env.active_questions)
+                comb_path = (
+                    f"{cfg['output_dir']}/{name}/"
+                    f"{name.replace(' ', '_')}_{q_ids}_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+                )
+                if eval_factors is not None or True:
+                    comb_eval = env.evaluate(comb_histories, eval_factors=eval_factors)
+                    comb_results["evaluation"] = comb_eval
+                write_json(comb_results, comb_path)
+                logging.info(f"Saved comb {comb_idx + 1} results to {comb_path}.")
 
         results_complete["agents_memory"] = {n: agent.memory for n, agent in env.agents.items()}
         write_json(results_complete, result_path)
@@ -454,6 +489,9 @@ def run_evaluation(interview_result: dict, eval_factors: List[str] = None) -> di
     try:
         logging.info(f"Running evaluation for {persona_stats['name']}...")
         eval_result = env.evaluate(histories, eval_factors=eval_factors)
+        eval_cost = env.agents["evaluator"].cost
+        persona_stats["eval_cost"] = eval_cost
+        persona_stats["total_cost"] = persona_stats.get("total_cost", 0.0) + eval_cost
         results_complete["evaluation"] = eval_result
         write_json(results_complete, result_path)
 
@@ -514,17 +552,20 @@ def evaluate(result_path: str, eval_factors: List[str] = None, evaluator_model: 
         histories.append(history)
 
     eval_result = env.evaluate(histories, eval_factors=eval_factors)
+    eval_cost = agents["evaluator"].cost
     env.shutdown()
 
-    # Save back
+    # Save back to result file
     results["evaluation"] = eval_result
     write_json(results, result_path)
 
+    eval_scores = {}
     if eval_result:
         internal = eval_result.get("internal", {}).get("score", {})
         external = eval_result.get("external", {}).get("score", {})
         stability = eval_result.get("stability", {})
-        return {
+        eval_scores = {
+            "eval_cost": eval_cost,
             "internal_harmonic_mean": internal.get("harmonic_mean"),
             "internal_responsiveness": internal.get("responsiveness_score"),
             "internal_consistency": internal.get("consistency_score"),
@@ -534,4 +575,16 @@ def evaluate(result_path: str, eval_factors: List[str] = None, evaluator_model: 
             "inter_session_stability": stability.get("inter_session", {}).get("score"),
             "intra_session_stability": stability.get("intra_session", {}).get("score"),
         }
-    return {}
+
+    # Update summary file if it exists alongside the result file
+    result_stem = os.path.splitext(os.path.basename(result_path))[0]
+    summary_dir = os.path.join(os.path.dirname(result_path), result_stem)
+    if os.path.isdir(summary_dir):
+        summary_files = glob.glob(os.path.join(summary_dir, "summary_*.json"))
+        for summary_path in summary_files:
+            summary = read_json(summary_path)
+            summary.setdefault("results", {}).update(eval_scores)
+            write_json(summary, summary_path)
+            logging.info(f"Updated summary: {summary_path}")
+
+    return eval_scores

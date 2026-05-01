@@ -459,7 +459,7 @@ class EvaluatorAgent(Agent):
         4. External check: For each confirmed search result, compare main QA + claims + confirmation QA + search result
            - If not confirmed → 'inconclusive'
            - If confirmed → 'conflict' or 'plausible'
-        
+
         Args:
             history: List of turns to evaluate
             eval_internal: Whether to evaluate internal consistency (uncooperative + internal)
@@ -467,6 +467,23 @@ class EvaluatorAgent(Agent):
         """
         if not eval_internal and not eval_external:
             return  # nothing to evaluate
+        if eval_internal:
+            self.results_dict['internal'] = {
+                'score': {"harmonic_mean": 0.0, "responsiveness_score": 0.0, "consistency_score": 0.0},
+                'conflict': {"count": 0, "details": []},
+                'plausible': {"count": 0, "details": []},
+                'uncooperative': {"count": 0, "details": []},
+            }
+        if eval_external:
+            self.results_dict['external'] = {
+                'score': {"ec_score": 0.0, "coverage": 0.0, "non_refutation_rate": 0.0},
+                'not_confirmed': {"count": 0, "details": []},
+                'claims': {
+                    'supported': {"count": 0, "details": []},
+                    'refuted': {"count": 0, "details": []},
+                    'nei': {"count": 0, "details": []}
+                }
+            }
         # Filter out repeat turns
         non_repeat_turns = [turn for turn in history if turn.type != 'repeat']
 
@@ -826,6 +843,7 @@ class EvaluatorAgent(Agent):
         self.results_dict['external']['score']['non_refutation_rate'] = non_refutation_rate
     
     def intra_session_eval(self, history: List[Turn]):
+        self.results_dict['stability']['intra_session'] = {'score': 0.0, 'details': []}
         completion_kwargs_list = []
         get_to_knows = [turn for turn in history if turn.type == 'get_to_know']
         repeats = [turn for turn in history if turn.type == 'repeat']
@@ -889,6 +907,7 @@ class EvaluatorAgent(Agent):
         self.results_dict['stability']['intra_session']['score'] = round(self.results_dict['stability']['intra_session']['score'] / len(get_to_knows), 4)
     
     def inter_session_eval(self, histories: List[List[Turn]]):
+        self.results_dict['stability']['inter_session'] = {'score': 0.0, 'details': []}
         # collect all get_to_know turns across sessions
         all_get_to_knows = []
         for history in histories:
@@ -966,8 +985,31 @@ class EvaluatorAgent(Agent):
                          Options: ['internal', 'external', 'intra', 'inter']
                          If None, all factors are evaluated.
         """
+        # Reset results_dict so repeated calls don't accumulate across combinations
+        self.results_dict = {
+            'internal': {
+                'score': {"harmonic_mean": 0.0, "responsiveness_score": 0.0, "consistency_score": 0.0},
+                'conflict': {"count": 0, "details": []},
+                'plausible': {"count": 0, "details": []},
+                'uncooperative': {"count": 0, "details": []},
+            },
+            'external': {
+                'score': {"ec_score": 0.0, "coverage": 0.0, "non_refutation_rate": 0.0},
+                'not_confirmed': {"count": 0, "details": []},
+                'claims': {
+                    'supported': {"count": 0, "details": []},
+                    'refuted': {"count": 0, "details": []},
+                    'nei': {"count": 0, "details": []}
+                }
+            },
+            'stability': {
+                'inter_session': {'score': 0.0, "details": []},
+                'intra_session': {'score': 0.0, "details": []}
+            }
+        }
+
         main_history = histories[0]
-        
+
         # Default to all factors if not specified
         if eval_factors is None:
             eval_factors = ['internal', 'external', 'intra', 'inter']

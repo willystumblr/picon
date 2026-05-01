@@ -424,6 +424,7 @@ class InterrogationEnv:
         ### log the evaluation results key by key
         for key, value in eval_action.content.items():
             logging.info(f"[EVALUATION] {key}: {value}\n")
+        logging.info(f"Evaluation cost: ${self.agents['evaluator'].cost:.6f}")
         return eval_action.content
     
     def save_state(self, termination_status: str = "Successfully completed") -> dict:

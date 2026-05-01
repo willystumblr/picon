@@ -1,5 +1,6 @@
 import os
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -641,9 +642,13 @@ class Top_agent:
             temp_current_messages.append(SystemMessage(content="You're chatting with someone in a coffee shop."))
 
         temp_current_messages.append(HumanMessage(content=message))
-        memory_retrieval = self.Memory_Agent.Memory_Retrieval(message)
-        thinking = self.Thinking_Agent.Thinking_analysis(message)
-        emotion = self.Emotion_Agent.Emotion_analysis(message)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_mem = pool.submit(self.Memory_Agent.Memory_Retrieval, message)
+            f_think = pool.submit(self.Thinking_Agent.Thinking_analysis, message)
+            f_emo = pool.submit(self.Emotion_Agent.Emotion_analysis, message)
+        memory_retrieval = f_mem.result()
+        thinking = f_think.result()
+        emotion = f_emo.result()
         
         if memory_retrieval:
             memory = str(memory_retrieval)

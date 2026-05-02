@@ -14,6 +14,10 @@ PICON evaluates persona agents across three dimensions:
 
 &nbsp;
 
+![PICON Framework](figures/framework_main.png)
+
+&nbsp;
+
 ## Installation
 
 ```bash
@@ -458,6 +462,10 @@ SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
 | **External Consistency (EC)** | Harmonic mean of Coverage and Non-refutation Rate |
 | **Retest Consistency (Inter)** | Answer stability across sessions |
 | **Retest Consistency (Intra)** | Answer stability within a session |
+
+&nbsp;
+
+![PICON Results](figures/results_main.png)
 
 &nbsp;
 

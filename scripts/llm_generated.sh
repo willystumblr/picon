@@ -4,8 +4,8 @@
 # Paper: https://arxiv.org/abs/2503.16527
 #
 # Usage:
-#   bash scripts/llm_generated.sh                              # 기본: 10개 랜덤 샘플
-#   SAMPLE_N=0 bash scripts/llm_generated.sh                   # 전체 실행
+#   bash scripts/llm_generated.sh                              # default: 10 random samples
+#   SAMPLE_N=0 bash scripts/llm_generated.sh                   # run all
 #   SAMPLE_N=5 SEED=123 PERSONA_TYPE=objective bash scripts/llm_generated.sh
 #
 # PERSONA_TYPE: descriptive (default) | subjective | objective | meta

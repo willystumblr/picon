@@ -1,14 +1,14 @@
 #!/bin/bash
 # Baseline: ConsistentLLM
 # Dataset: picon/env/personas/consistent_llm_personas.jsonl
-#   - 각 줄: persona, name, counterpart_name, instruction, model_path 필드 포함 JSON
+#   - each line: JSON with fields persona, name, counterpart_name, instruction, model_path
 #
 # Requires: ConsistentLLM fine-tuned model served via vLLM
 #   vllm serve <model_path> --port 8001
 #
 # Usage:
-#   bash scripts/consistent_llm.sh                          # 기본: 10개 랜덤 샘플
-#   SAMPLE_N=0 bash scripts/consistent_llm.sh              # 전체 실행
+#   bash scripts/consistent_llm.sh                          # default: 10 random samples
+#   SAMPLE_N=0 bash scripts/consistent_llm.sh              # run all
 #   SAMPLE_N=5 SEED=123 bash scripts/consistent_llm.sh
 #   SIMULATOR_MODEL=hosted_vllm/my-model bash scripts/consistent_llm.sh
 #   SIMULATOR_PORT=8002 bash scripts/consistent_llm.sh
@@ -54,7 +54,7 @@ if sample_n > 0:
 for p in personas:
     data = json.loads(p)
     name = data.get("name", "Unknown")
-    # Print name and full JSON on one line, tab-separated
+    # print name and full JSON on one line, tab-separated
     print(name + "\t" + p)
 EOF
 )

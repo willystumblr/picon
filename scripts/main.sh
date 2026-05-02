@@ -1,137 +1,83 @@
 #!/bin/bash
-python main.py \
-    --baseline_name opencharacter \
-    --questioner_model gpt-5 \
-    --extractor_model gpt-5.1 \
-    --web_search_model gpt-5 \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --evaluator_model gpt-5.1 \
-    --simulator_model hosted_vllm/anonymous/opencharacter-sft-llama-3-8b-instruct --simulator_host localhost--simulator_port 8123 \
-    --do_sample
+# Run all 8 persona agent baselines sequentially.
+#
+# Prerequisites:
+#   - Set API keys in .env (OPENAI_API_KEY, GEMINI_API_KEY, SERPER_API_KEY, etc.)
+#   - For Character.AI:   set CAI_TOKEN=<your_token>
+#   - For DeepPersona:    set DATASET_DIR=/path/to/deeppersona
+#   - For OpenCharacter:  start vLLM server first (vllm serve <model> --port 8000)
+#   - For ConsistentLLM:  start vLLM server first (vllm serve <model> --port 8001)
+#
+# Common options (apply to all baselines unless overridden per-script):
+#   SAMPLE_N=10    — number of personas to sample per baseline (0 = all)
+#   SEED=42        — random seed
+#
+# Usage:
+#   bash scripts/main.sh
+#   SAMPLE_N=5 bash scripts/main.sh
+#   SAMPLE_N=0 DATASET_DIR=/path/to/deeppersona CAI_TOKEN=<token> bash scripts/main.sh
 
-python main.py \
-    --baseline_name llm_generated \
-    --questioner_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 \
-    --questioner_port 8899 \
-    --extractor_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --extractor_port 8001 \
-    --web_search_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8  \
-    --web_search_port 8899 \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --evaluator_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --evaluator_port 8899 \
-    --log_to_file \
-    --simulator_model gemini/gemini-3-flash-preview  \
-    --do_sample
+set -e
 
-python main.py \
-    --baseline_name characterai \
-    --questioner_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 \
-    --questioner_port 8900 \
-    --extractor_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --extractor_port 8899 \
-    --web_search_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8  \
-    --web_search_port 8900\
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --evaluator_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --evaluator_port 8899 \
-    --log_to_file
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+export SAMPLE_N=${SAMPLE_N:-10}
+export SEED=${SEED:-42}
 
+echo "=================================================="
+echo "PICON: Running all 8 persona agent baselines"
+echo "SAMPLE_N=${SAMPLE_N}, SEED=${SEED}"
+echo "=================================================="
 
-python main.py \
-    --baseline_name twin_2k_500 \
-    --questioner_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 \
-    --questioner_port 8900 \
-    --extractor_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --extractor_port 8899 \
-    --web_search_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8  \
-    --web_search_port 8900 \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --simulator_model gemini/gemini-3-flash-preview \
-    --evaluator_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --evaluator_port 8899 \
-    --log_to_file \
-    --do_sample
+# 1. Nemotron (nvidia/Nemotron-Personas-* — 7 regional HuggingFace datasets)
+echo ""
+echo "[1/8] Nemotron"
+bash "${SCRIPT_DIR}/nemotron.sh"
 
-python main.py \
-    --baseline_name deeppersona \
-    --questioner_model gpt-5  \
-    --extractor_model gpt-5.1 \
-    --web_search_model gpt-5  \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --simulator_model gemini/gemini-3-flash-preview \
-    --evaluator_model gpt-5.1 \
-    --log_to_file \
-    --do_sample
+# 2. Twin-2K-500 (LLM-Digital-Twin/Twin-2K-500 HuggingFace dataset)
+echo ""
+echo "[2/8] Twin-2K-500"
+bash "${SCRIPT_DIR}/twin_2k_500.sh"
 
-python main.py \
-    --baseline_name deeppersona \
-    --questioner_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 \
-    --questioner_port 8900 \
-    --extractor_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --extractor_port 8899 \
-    --web_search_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8  \
-    --web_search_port 8900 \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --evaluator_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --evaluator_port 8899 \
-    --simulator_model gemini/gemini-3-flash-preview \
-    --log_to_file
+# 3. LLM-Generated (Tianyi-Lab/Personas HuggingFace dataset)
+echo ""
+echo "[3/8] LLM-Generated"
+bash "${SCRIPT_DIR}/llm_generated.sh"
 
-python main.py \
-    --baseline_name human_simulacra \
-    --questioner_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 \
-    --questioner_port 8900 \
-    --extractor_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --extractor_port 8899 \
-    --web_search_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8  \
-    --web_search_port 8900 \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --simulator_model gemini/gemini-3-flash-preview \
-    --evaluator_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --evaluator_port 8899 \
-    --num_sessions 2 \
-    --log_to_file
+# 4. DeepPersona (requires DATASET_DIR=/path/to/deeppersona)
+echo ""
+echo "[4/8] DeepPersona"
+if [ -z "${DATASET_DIR}" ]; then
+    echo "SKIPPED: DATASET_DIR is not set. Set DATASET_DIR=/path/to/deeppersona to run this baseline."
+else
+    bash "${SCRIPT_DIR}/deeppersona.sh"
+fi
 
+# 5. Human Simulacra (11 fixed RAG-based characters)
+echo ""
+echo "[5/8] Human Simulacra"
+bash "${SCRIPT_DIR}/human_simulacra.sh"
 
-python main.py \
-    --baseline_name consistent_llm \
-    --questioner_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 \
-    --questioner_port 8900 \
-    --extractor_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --extractor_port 8899 \
-    --web_search_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8  \
-    --web_search_port 8900 \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --evaluator_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --evaluator_port 8899 \
-    --simulator_model hosted_vllm/anonymous/consistent_llm_llama-8b-sft-ppo-prompt --simulator_port 8001 \
-    --simulator_host localhost \
-    --do_sample 
+# 6. ConsistentLLM (requires vLLM server: vllm serve <model> --port 8001)
+echo ""
+echo "[6/8] ConsistentLLM"
+bash "${SCRIPT_DIR}/consistent_llm.sh"
 
+# 7. OpenCharacter (requires vLLM server: vllm serve <model> --port 8000)
+echo ""
+echo "[7/8] OpenCharacter"
+bash "${SCRIPT_DIR}/opencharacter.sh"
 
-python main.py \
-    --baseline_name opencharacter \
-    --questioner_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 \
-    --questioner_port 8900 \
-    --extractor_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --extractor_port 8899 \
-    --web_search_model hosted_vllm/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8  \
-    --web_search_port 8900 \
-    --num_turns 50 \
-    --nhd_model gpt-5-nano \
-    --evaluator_model hosted_vllm/Qwen/Qwen3-Next-80B-A3B-Thinking \
-    --evaluator_port 8899 \
-    --simulator_model hosted_vllm/anonymous/opencharacter-sft-llama-3-8b-instruct \
-    --simulator_port 8123 \
-    --simulator_host localhost \
-    --do_sample
+# 8. Character.AI (requires CAI_TOKEN)
+echo ""
+echo "[8/8] Character.AI"
+if [ -z "${CAI_TOKEN}" ] && [ -z "${CAI_API_KEY}" ]; then
+    echo "SKIPPED: CAI_TOKEN is not set. Set CAI_TOKEN=<your_token> to run this baseline."
+else
+    bash "${SCRIPT_DIR}/characterai.sh"
+fi
+
+echo ""
+echo "=================================================="
+echo "All baselines completed."
+echo "=================================================="

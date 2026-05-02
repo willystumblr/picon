@@ -1,16 +1,16 @@
 #!/bin/bash
 # Baseline: Character.AI
-# Characters: picon/env/personas/characterai.json (10명 고정)
-# CAI_TOKEN 환경변수 필요 (Character.AI session token)
+# Characters: picon/env/personas/characterai.json (fixed set)
+# Requires: CAI_TOKEN environment variable (Character.AI session token)
 #
 # Usage:
 #   CAI_TOKEN=<token> bash scripts/characterai.sh
 #   CAI_TOKEN=<token> SAMPLE_N=5 bash scripts/characterai.sh
-#   CAI_TOKEN=<token> SAMPLE_N=0 bash scripts/characterai.sh   # 전체 실행
+#   CAI_TOKEN=<token> SAMPLE_N=0 bash scripts/characterai.sh   # run all
 #   CAI_TOKEN=<token> SAMPLE_N=3 SEED=7 bash scripts/characterai.sh
 
 SERVER_HOST=${SERVER_HOST:-"localhost"}
-BASE_PORT=${BASE_PORT:-8100}   # 캐릭터마다 BASE_PORT+N 포트 사용
+BASE_PORT=${BASE_PORT:-8100}   # each character uses BASE_PORT+N
 SAMPLE_N=${SAMPLE_N:-1}
 SEED=${SEED:-42}
 PERSONAS_FILE=${PERSONAS_FILE:-"picon/env/personas/characterai.json"}
@@ -64,14 +64,12 @@ while IFS=$'\t' read -r CHARACTER_NAME CHARACTER_ID; do
 
     wait_for_slot
     (
-        # 이 캐릭터 전용 서버 시작
         python servers/characterai_server.py \
             --port "${PORT}" \
             --character_id "${CHARACTER_ID}" \
             --user_id "${CAI_TOKEN}" &
         SERVER_PID=$!
 
-        # 서버 준비 대기
         for i in $(seq 1 30); do
             if curl -sf "http://${SERVER_HOST}:${PORT}/" > /dev/null 2>&1; then
                 break

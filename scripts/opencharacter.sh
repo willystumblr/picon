@@ -7,8 +7,8 @@
 #   vllm serve <your-opencharacter-model> --port 8000
 #
 # Usage:
-#   bash scripts/opencharacter.sh                              # 기본: 10개 랜덤 샘플
-#   SAMPLE_N=0 bash scripts/opencharacter.sh                   # 전체 실행
+#   bash scripts/opencharacter.sh                              # default: 10 random samples
+#   SAMPLE_N=0 bash scripts/opencharacter.sh                   # run all
 #   VLLM_BASE=http://localhost:8000/v1 SAMPLE_N=5 bash scripts/opencharacter.sh
 
 VLLM_BASE=${VLLM_BASE:-"http://localhost:8000/v1"}

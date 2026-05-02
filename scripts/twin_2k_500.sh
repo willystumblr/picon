@@ -3,8 +3,8 @@
 # Dataset: HuggingFace LLM-Digital-Twin/Twin-2K-500 (full_persona split)
 #
 # Usage:
-#   bash scripts/twin_2k_500.sh                   # 기본: 10개 랜덤 샘플
-#   SAMPLE_N=0 bash scripts/twin_2k_500.sh        # 전체 실행
+#   bash scripts/twin_2k_500.sh                   # default: 10 random samples
+#   SAMPLE_N=0 bash scripts/twin_2k_500.sh        # run all
 #   SAMPLE_N=5 SEED=123 bash scripts/twin_2k_500.sh
 
 SAMPLE_N=${SAMPLE_N:-10}

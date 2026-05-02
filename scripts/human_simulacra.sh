@@ -1,11 +1,11 @@
 #!/bin/bash
 # Baseline: Human Simulacra
-# Characters: 11명 고정 (RAG 기반 에이전트)
-# Requires: human_simulacra_server.py (자동 기동됨)
+# Characters: 11 fixed characters (RAG-based agents)
+# Requires: human_simulacra_server.py (started automatically)
 #
 # Usage:
-#   bash scripts/human_simulacra.sh                   # 기본: 전체 11명 중 10명 랜덤 샘플
-#   SAMPLE_N=0 bash scripts/human_simulacra.sh        # 전체 11명 실행
+#   bash scripts/human_simulacra.sh                   # default: 10 random samples from 11 characters
+#   SAMPLE_N=0 bash scripts/human_simulacra.sh        # run all 11 characters
 #   SAMPLE_N=3 SEED=7 bash scripts/human_simulacra.sh
 #   SIMULATOR_MODEL=gemini/gemini-2.5-flash bash scripts/human_simulacra.sh
 
@@ -13,7 +13,7 @@ BASE_PORT=${BASE_PORT:-8100}
 SAMPLE_N=${SAMPLE_N:-10}
 SEED=${SEED:-42}
 SIMULATOR_MODEL=${SIMULATOR_MODEL:-"gemini/gemini-2.5-flash"}
-MAX_PARALLEL=${MAX_PARALLEL:-3}   # RAG 로딩이 무거우므로 낮게 설정
+MAX_PARALLEL=${MAX_PARALLEL:-3}   # keep low due to heavy RAG loading
 
 wait_for_slot() {
     while [ "$(jobs -r | wc -l)" -ge "$MAX_PARALLEL" ]; do
@@ -69,7 +69,7 @@ while IFS= read -r CHARACTER_NAME; do
             --model "${SIMULATOR_MODEL}" &
         SERVER_PID=$!
 
-        # RAG 로딩 시간 고려하여 최대 60초 대기
+        # wait up to 60 seconds for RAG loading
         for i in $(seq 1 60); do
             if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
                 break

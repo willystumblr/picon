@@ -12,8 +12,8 @@
 # Sampling: at least 1 per dataset, remainder filled randomly across all datasets.
 #
 # Usage:
-#   bash scripts/nemotron.sh                        # 기본: 10마리 (7 그룹 각 1마리 + 3 추가)
-#   SAMPLE_N=7 bash scripts/nemotron.sh             # 각 그룹 1마리씩만
+#   bash scripts/nemotron.sh                        # default: 10 personas (1 per region + 3 extra)
+#   SAMPLE_N=7 bash scripts/nemotron.sh             # exactly 1 per region
 #   SAMPLE_N=14 SEED=123 bash scripts/nemotron.sh
 
 SAMPLE_N=${SAMPLE_N:-10}

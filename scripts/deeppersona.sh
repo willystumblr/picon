@@ -6,10 +6,10 @@
 #   export DATASET_DIR="/path/to/deeppersona"
 #
 # Usage:
-#   DATASET_DIR=/path/to/deeppersona bash scripts/deeppersona.sh   # 기본: 10개 랜덤 샘플
-#   SAMPLE_N=0 bash scripts/deeppersona.sh                         # 전체 실행 (샘플링 없음)
-#   SAMPLE_N=5 bash scripts/deeppersona.sh                         # 5개만 샘플링
-#   SEED=123 bash scripts/deeppersona.sh                           # 랜덤 시드 지정
+#   DATASET_DIR=/path/to/deeppersona bash scripts/deeppersona.sh   # default: 10 random samples
+#   SAMPLE_N=0 bash scripts/deeppersona.sh                         # run all (no sampling)
+#   SAMPLE_N=5 bash scripts/deeppersona.sh                         # sample 5 personas
+#   SEED=123 bash scripts/deeppersona.sh                           # set random seed
 
 if [ -f ".env" ]; then
   set -a; source .env; set +a
@@ -38,7 +38,7 @@ wait_for_slot() {
     done
 }
 
-# 모든 (파일, 프로필키) 쌍을 수집한 뒤 샘플링
+# collect all (file, profile_key) pairs then sample
 PERSONA_LIST=$(python3 - <<EOF
 import json, glob, os, random
 

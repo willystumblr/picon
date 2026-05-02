@@ -18,6 +18,12 @@ PICON evaluates persona agents across three dimensions:
 
 &nbsp;
 
+## Results
+
+![PICON Results](figures/results_main.png)
+
+&nbsp;
+
 ## Installation
 
 ```bash
@@ -464,8 +470,6 @@ SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
 | **Retest Consistency (Intra)** | Answer stability within a session |
 
 &nbsp;
-
-![PICON Results](figures/results_main.png)
 
 &nbsp;
 

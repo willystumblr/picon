@@ -14,6 +14,7 @@ from tiktoken import encoding_for_model
 from litellm import get_max_tokens
 
 load_dotenv()  # Load environment variables from .env file
+logging.getLogger("google_genai.models").setLevel(logging.WARNING)
 BASE_DIR = os.path.dirname(__file__)
 PROMPT_DIR = f"{BASE_DIR}/prompts"
 BASE_URL = "https://api.openai.com/v1"  # For RAG embeddings (OpenAI)
@@ -710,7 +711,7 @@ class Top_agent:
         temp_chat_history.append("You: " + agents_ans)
         
         self.chat_history.append(temp_chat_history)
-        logging.info(f"mem: {self.Memory_Agent.cost}, think: {self.Thinking_Agent.cost}, emo: {self.Emotion_Agent.cost}, top: {self.cost}")
+        logging.debug(f"mem: {self.Memory_Agent.cost}, think: {self.Thinking_Agent.cost}, emo: {self.Emotion_Agent.cost}, top: {self.cost}")
         return agents_ans
         
     def bandwagon_chat(self, query, chat_history=None):

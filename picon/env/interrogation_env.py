@@ -30,7 +30,7 @@ from picon.schemas import State, Action, Observation, Turn
 
 class InterrogationEnv:
     def __init__(
-        self, 
+        self,
         agents: Dict[str, Agent] = {},
         baseline_name: str = "characterai",
         tools: Dict[str, Any] = {},
@@ -38,8 +38,12 @@ class InterrogationEnv:
         question_path: str = None,
         instruction_path: str = None,
         result_data=None,
+        verbose: bool = True,
         **kwargs
         ):
+        self.verbose = verbose
+        if verbose:
+            logging.getLogger().setLevel(logging.ERROR)
         
         # random seed for reproducibility
         seed = kwargs.get('question_seed', 42)
@@ -65,7 +69,7 @@ class InterrogationEnv:
             
             self.baseline_name = baseline_name
 
-            num_get_to_know_q = kwargs.pop('num_get_to_know_q', 1)
+            num_get_to_know_q = kwargs.pop('num_get_to_know_q', 10)
             num_combs = kwargs.pop('num_combs', 1)
             self.interviewee_kwargs = kwargs
 
@@ -215,8 +219,12 @@ class InterrogationEnv:
         # Run the active combination of predefined questions
         for i, q in enumerate(self.active_questions):
             logging.info(f"[QUESTION] {q['question']}")
+            if self.verbose:
+                print(f"[Q] {q['question']}")
             response = self.interviewee.get_response(q['question'])
             logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
+            if self.verbose:
+                print(f"[{self.interviewee.name}] {response.content}\n")
 
             action = Action(action_type="respond", content=q['question'])
             res_observation = Observation(
@@ -373,9 +381,13 @@ class InterrogationEnv:
         # question_act = self.agents['questioner'].act(verdict=verdict)
         question_act = self.agents['questioner'].act()
         logging.info(f"[ACTION] Questioner: {question_act.action_type} - {question_act.content if question_act.content else question_act.tool_call.tool_name}")
+        if self.verbose:
+            print(f"[Turn {self.state.current_turn + 1}] [Q] {question_act.content}")
         self.agents['evaluator'].update_memory(role="assistant", content=question_act.content)
         interviewee_res = self.interviewee.get_response(question_act.content)
         logging.info(f"[RESPONSE] {self.interviewee.name}: {interviewee_res.content}")
+        if self.verbose:
+            print(f"[{self.interviewee.name}] {interviewee_res.content}\n")
         
         self.agents['questioner'].update_memory(role="user", content=interviewee_res.content) 
         self.agents['evaluator'].update_memory(role="user", content=interviewee_res.content)
@@ -401,8 +413,12 @@ class InterrogationEnv:
         """repeat stage: repeat the pre-defined questions to check for consistency"""
         for i, q in enumerate(self.active_questions):
             logging.info(f"[REPEAT QUESTION] Just to clarify, {q['question']}")
+            if self.verbose:
+                print(f"[Repeat Q] Just to clarify, {q['question']}")
             response = self.interviewee.get_response(f"Just to clarify, {q['question']}")
             logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
+            if self.verbose:
+                print(f"[{self.interviewee.name}] {response.content}\n")
             # update state
             action = Action(action_type="respond", content=q['question'])
             observation = Observation(

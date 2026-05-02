@@ -137,4 +137,4 @@ if __name__ == "__main__":
     client = OpenAI(base_url=args.vllm_base, api_key="no-key")
     logging.info(f"vLLM: {args.vllm_base} / {args.vllm_model}")
     logging.info(f"PICON endpoint: http://localhost:{args.port}/v1")
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="error", access_log=False)

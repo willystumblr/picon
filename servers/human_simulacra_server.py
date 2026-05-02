@@ -89,4 +89,4 @@ if __name__ == "__main__":
     agent = Top_agent(character_name=args.character_name, model=args.model)
     logging.info(f"Agent loaded. Starting server on port {args.port}")
 
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="error", access_log=False)

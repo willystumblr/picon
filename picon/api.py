@@ -54,7 +54,7 @@ class PiconResult:
 
 
 def run(
-    persona: str,
+    persona: str = "",
     name: str = "Agent",
     model: str = None,
     api_base: str = None,
@@ -70,6 +70,7 @@ def run(
     nhd_model: str = None,
     output_dir: str = None,
     question_seed: int = 42,
+    verbose: bool = False,
     **kwargs,
 ) -> PiconResult:
     """Run persona interview + evaluation in one call.
@@ -140,6 +141,7 @@ def run(
             tools=tools,
             max_turns=num_turns,
             question_path=get_question_path(),
+            verbose=verbose,
             **interviewee_kwargs,
         )
 
@@ -148,6 +150,8 @@ def run(
         reset_only = False
         for session_idx in range(num_sessions):
             logging.info(f"Starting session {session_idx + 1}/{num_sessions} for: {name}")
+            if verbose:
+                print(f"\n=== Session {session_idx + 1}/{num_sessions} ===\n")
             env.reset(reset_only=reset_only)
             if not reset_only:
                 done = False
@@ -185,12 +189,12 @@ def run(
                 external = eval_result.get("external", {}).get("score", {})
                 stability = eval_result.get("stability", {})
                 eval_scores = {
-                    "internal_harmonic_mean": internal.get("harmonic_mean"),
-                    "internal_responsiveness": internal.get("responsiveness_score"),
-                    "internal_consistency": internal.get("consistency_score"),
+                    "ic_score": internal.get("ic_score"),
+                    "cooperativeness": internal.get("cooperativeness"),
+                    "non_contradiction_rate": internal.get("non_contradiction_rate"),
                     "external_ec": external.get("ec_score"),
-                    "external_coverage": external.get("coverage"),
-                    "external_non_refutation_rate": external.get("non_refutation_rate"),
+                    "coverage": external.get("coverage"),
+                    "non_refutation_rate": external.get("non_refutation_rate"),
                     "inter_session_stability": stability.get("inter_session", {}).get("score"),
                     "intra_session_stability": stability.get("intra_session", {}).get("score"),
                 }
@@ -307,12 +311,12 @@ def run_interview(
         "num_turns_completed": 0,
         "num_tool_calls": 0,
         "sessions_completed": 0,
-        "eval_internal_harmonic_mean": None,
-        "eval_internal_responsiveness": None,
-        "eval_internal_consistency": None,
+        "eval_ic_score": None,
+        "eval_cooperativeness": None,
+        "eval_non_contradiction_rate": None,
         "eval_external_ec_score": None,
-        "eval_external_coverage": None,
-        "eval_external_non_refutation_rate": None,
+        "eval_coverage": None,
+        "eval_non_refutation_rate": None,
         "eval_stability_inter_session": None,
         "eval_stability_intra_session": None,
     }
@@ -502,12 +506,12 @@ def run_evaluation(interview_result: dict, eval_factors: List[str] = None) -> di
             internal_score = internal.get("score", {})
             external_score = external.get("score", {})
 
-            persona_stats["eval_internal_harmonic_mean"]  = internal_score.get("harmonic_mean")
-            persona_stats["eval_internal_responsiveness"] = internal_score.get("responsiveness_score")
-            persona_stats["eval_internal_consistency"]    = internal_score.get("consistency_score")
-            persona_stats["eval_external_ec_score"]       = external_score.get("ec_score")
-            persona_stats["eval_external_coverage"]       = external_score.get("coverage")
-            persona_stats["eval_external_non_refutation_rate"]           = external_score.get("non_refutation_rate")
+            persona_stats["eval_ic_score"]              = internal_score.get("ic_score")
+            persona_stats["eval_cooperativeness"]        = internal_score.get("cooperativeness")
+            persona_stats["eval_non_contradiction_rate"] = internal_score.get("non_contradiction_rate")
+            persona_stats["eval_external_ec_score"]      = external_score.get("ec_score")
+            persona_stats["eval_coverage"]               = external_score.get("coverage")
+            persona_stats["eval_non_refutation_rate"]    = external_score.get("non_refutation_rate")
             persona_stats["eval_stability_inter_session"] = stability.get("inter_session", {}).get("score")
             persona_stats["eval_stability_intra_session"] = stability.get("intra_session", {}).get("score")
 

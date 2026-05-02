@@ -130,4 +130,4 @@ if __name__ == "__main__":
     logging.info(f"Agent: {agent_name}")
     logging.info(f"vLLM: {args.vllm_base} / {vllm_model}")
     logging.info(f"PICON endpoint: http://localhost:{args.port}/v1")
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="error", access_log=False)

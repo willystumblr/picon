@@ -195,7 +195,7 @@ class InterrogationSimulation:
         self.output_dir = output_dir or DEFAULT_CONFIG["output_dir"]
         self.question_seed = question_seed
 
-    def run(self, do_eval: bool = True, eval_factors: List[str] = None) -> "PiconResult":
+    def run(self, do_eval: bool = True, eval_factors: List[str] = None, verbose: bool = True) -> "PiconResult":
         """Run the interview pipeline and optionally evaluate.
 
         Args:
@@ -256,6 +256,7 @@ class InterrogationSimulation:
                 tools=tools,
                 max_turns=self.num_turns,
                 question_path=get_question_path(),
+                verbose=verbose,
                 **interviewee_kwargs,
             )
 
@@ -264,6 +265,8 @@ class InterrogationSimulation:
             reset_only = False
             for session_idx in range(self.num_sessions):
                 logging.info(f"Starting session {session_idx + 1}/{self.num_sessions} for: {name}")
+                if verbose:
+                    print(f"\n=== Session {session_idx + 1}/{self.num_sessions} ===\n")
                 env.reset(reset_only=reset_only)
                 if not reset_only:
                     done = False
@@ -299,12 +302,12 @@ class InterrogationSimulation:
                     external = eval_result.get("external", {}).get("score", {})
                     stability = eval_result.get("stability", {})
                     eval_scores = {
-                        "internal_harmonic_mean": internal.get("harmonic_mean"),
-                        "internal_responsiveness": internal.get("responsiveness_score"),
-                        "internal_consistency": internal.get("consistency_score"),
+                        "ic_score": internal.get("ic_score"),
+                        "cooperativeness": internal.get("cooperativeness"),
+                        "non_contradiction_rate": internal.get("non_contradiction_rate"),
                         "external_ec": external.get("ec_score"),
-                        "external_coverage": external.get("coverage"),
-                        "external_non_refutation_rate": external.get("non_refutation_rate"),
+                        "coverage": external.get("coverage"),
+                        "non_refutation_rate": external.get("non_refutation_rate"),
                         "inter_session_stability": stability.get("inter_session", {}).get("score"),
                         "intra_session_stability": stability.get("intra_session", {}).get("score"),
                     }

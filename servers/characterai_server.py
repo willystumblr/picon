@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     async def main():
         await setup_client(args.user_id, args.character_id)
-        config = uvicorn.Config(app, host="0.0.0.0", port=args.port)
+        config = uvicorn.Config(app, host="0.0.0.0", port=args.port, access_log=False)
         server = uvicorn.Server(config)
         await server.serve()
 

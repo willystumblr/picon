@@ -84,9 +84,9 @@ class EvaluatorAgent(Agent):
         self.results_dict = {
             'internal': {
                 'score': {
-                    "harmonic_mean": 0.0,
-                    "responsiveness_score": 0.0,
-                    "consistency_score": 0.0         
+                    "ic_score": 0.0,
+                    "cooperativeness": 0.0,
+                    "non_contradiction_rate": 0.0,
                 },
                 'conflict': {
                     "count": 0,
@@ -469,7 +469,7 @@ class EvaluatorAgent(Agent):
             return  # nothing to evaluate
         if eval_internal:
             self.results_dict['internal'] = {
-                'score': {"harmonic_mean": 0.0, "responsiveness_score": 0.0, "consistency_score": 0.0},
+                'score': {"ic_score": 0.0, "cooperativeness": 0.0, "non_contradiction_rate": 0.0},
                 'conflict': {"count": 0, "details": []},
                 'plausible': {"count": 0, "details": []},
                 'uncooperative': {"count": 0, "details": []},
@@ -803,9 +803,9 @@ class EvaluatorAgent(Agent):
             internal_score = 2 * internal_plausible_ratio * responsive_ratio / (internal_plausible_ratio + responsive_ratio)
         else:
             internal_score = 0.0
-        self.results_dict['internal']['score']['harmonic_mean'] = internal_score
-        self.results_dict['internal']['score']['responsiveness_score'] = responsive_ratio
-        self.results_dict['internal']['score']['consistency_score'] = internal_plausible_ratio
+        self.results_dict['internal']['score']['ic_score'] = internal_score
+        self.results_dict['internal']['score']['cooperativeness'] = responsive_ratio
+        self.results_dict['internal']['score']['non_contradiction_rate'] = internal_plausible_ratio
 
     def _calculate_external_scores(self, total_turns: int, turns_with_claims: set,
                                    turn_confirmed_counts: dict, turn_refuted_counts: dict):
@@ -988,7 +988,7 @@ class EvaluatorAgent(Agent):
         # Reset results_dict so repeated calls don't accumulate across combinations
         self.results_dict = {
             'internal': {
-                'score': {"harmonic_mean": 0.0, "responsiveness_score": 0.0, "consistency_score": 0.0},
+                'score': {"ic_score": 0.0, "cooperativeness": 0.0, "non_contradiction_rate": 0.0},
                 'conflict': {"count": 0, "details": []},
                 'plausible': {"count": 0, "details": []},
                 'uncooperative': {"count": 0, "details": []},

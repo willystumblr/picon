@@ -123,7 +123,7 @@ result.save("results/john.json")
 
 # Example output:
 # {
-#     "internal_harmonic_mean": 0.82,
+#     "ic_score": 0.82,
 #     "external_ec": 0.75,
 #     "inter_session_stability": 0.68,
 #     "intra_session_stability": 0.91,
@@ -451,11 +451,11 @@ SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
 
 | Metric | Description |
 |--------|-------------|
-| **Internal Responsiveness** | Relevance of answers to questions |
-| **Internal Consistency** | Consistency of answers to repeated questions |
-| **Internal Harmonic Mean** | Harmonic mean of Responsiveness and Consistency |
-| **External Coverage** | Fraction of turns containing at least one verifiable claim |
-| **External Non-refutation Rate** | Per-turn rate of claims not refuted by web evidence |
+| **Cooperativeness** | Fraction of turns with substantive, non-evasive responses |
+| **Non-contradiction Rate** | Degree to which responses remain free of contradictions |
+| **Internal Consistency (IC)** | Harmonic mean of Cooperativeness and Non-contradiction Rate |
+| **Coverage** | Fraction of turns containing at least one verifiable claim |
+| **Non-refutation Rate** | Per-turn rate of claims not refuted by web evidence |
 | **External Consistency (EC)** | Harmonic mean of Coverage and Non-refutation Rate |
 | **Retest Consistency (Inter)** | Answer stability across sessions |
 | **Retest Consistency (Intra)** | Answer stability within a session |

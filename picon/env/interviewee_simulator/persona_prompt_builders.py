@@ -75,14 +75,18 @@ def extract_llm_generated_name(persona_data) -> str:
         for field in ["name", "NAME", "character_name", "persona_name"]:
             if field in persona_data:
                 return persona_data[field]
-        if "descriptive_persona" in persona_data:
-            name_match = re.search(
-                r"(?:Name:\s*|Meet\s*)([A-Z][a-z]+\s+[A-Z][a-z]+)",
-                persona_data["descriptive_persona"],
-            )
-            if name_match:
-                return name_match.group(1)
-    return "Anonymous Persona"
+        text = persona_data.get("descriptive_persona", "")
+    elif isinstance(persona_data, str):
+        text = persona_data
+    else:
+        return ""
+    name_match = re.search(
+        r"(?:Name:\s*|Meet\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)",
+        text,
+    )
+    if name_match:
+        return name_match.group(1)
+    return ""
 
 
 def _build_persona_description(persona_data, persona_type: str) -> str:

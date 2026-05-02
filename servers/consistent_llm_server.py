@@ -150,4 +150,4 @@ if __name__ == "__main__":
     vllm_port = args.vllm_port
 
     logging.info(f"ConsistentLLM server starting on port {args.port}")
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="error", access_log=False)

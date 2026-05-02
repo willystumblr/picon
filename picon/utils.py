@@ -15,6 +15,9 @@ except ImportError:
     genai = None
     genai_types = None
 
+for _noisy in ("LiteLLM", "httpx", "google", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.ERROR)
+
 try:
     from openai import OpenAI
 except ImportError:
@@ -72,6 +75,14 @@ def _identify_caller() -> str:
         return "unknown"
 
 
+def _get_model_max_tokens(model: str) -> int | None:
+    try:
+        info = litellm.get_model_info(model)
+        return info.get("max_tokens") or info.get("max_output_tokens")
+    except Exception:
+        return None
+
+
 def get_completion(model: str, messages: list, temperature: float = 1.0, max_retries=3, **kwargs):
     litellm.drop_params = True
     if _is_claude_family(model):
@@ -79,6 +90,10 @@ def get_completion(model: str, messages: list, temperature: float = 1.0, max_ret
         kwargs.pop("thinking", None)
     caller = _identify_caller()
     kwargs.setdefault("timeout", 120)
+    if "max_tokens" in kwargs:
+        model_max = _get_model_max_tokens(model)
+        if model_max is not None:
+            kwargs["max_tokens"] = min(kwargs["max_tokens"], model_max)
     for attempt in range(1, max_retries+1):
         try:
             response = completion(

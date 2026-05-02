@@ -124,4 +124,4 @@ if __name__ == "__main__":
     model = args.model
     logging.info(f"Model: {model}")
     logging.info(f"PICON endpoint: http://localhost:{args.port}/v1")
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="error", access_log=False)

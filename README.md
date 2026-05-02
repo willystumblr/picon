@@ -20,8 +20,8 @@ PICON evaluates persona agents across three dimensions:
 
 ## Results
 
-No persona group matched the all-round consistency of the human baseline, confirming that current persona agents fall short of faithfully embodying a real person's identity.
-Inference-time conditioning (prompting or RAG) consistently outperformed fine-tuned models, suggesting that fine-tuning alone does not translate to robust consistency under chained interrogation.
+No persona group achieved a larger consistency area than the human baseline, suggesting that current persona agents have not yet reached the level of a real person faithfully embodying their own identity.
+Inference-time conditioning methods (prompting or RAG) tended to score higher than fine-tuned models, indicating that fine-tuning for persona may not be sufficient for robust consistency under chained interrogation.
 
 ![PICON Results](figures/results_main.png)
 

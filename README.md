@@ -14,14 +14,6 @@ PICON evaluates persona agents across three dimensions:
 
 &nbsp;
 
-### Recent updates
-* *April 2026 (v0.1.3)*: AWS Bedrock Claude compatibility — `reasoning_effort`/`thinking` are automatically stripped for all Claude-family models (including `bedrock/anthropic.claude-*` and `anthropic/claude-*`). Reasoning/thinking is also disabled by default for interviewee API calls to keep persona replies direct.
-* *March 2026 (v0.1.0)*: Initial release with interview pipeline, evaluation, and CLI.
-
-&nbsp;
-
-&nbsp;
-
 ## Installation
 
 ```bash
@@ -38,6 +30,13 @@ git clone https://github.com/anonymous/picon.git
 cd picon
 pip install -e ".[all]"
 ```
+
+&nbsp;
+
+## Tutorial
+
+For a hands-on walkthrough of PICON's features, see the [picon_tutorial.ipynb](picon_tutorial.ipynb) notebook.
+It covers installation, running interviews, evaluation, and interpreting results with worked examples.
 
 &nbsp;
 
@@ -530,45 +529,6 @@ MAX_PARALLEL=3 bash scripts/opencharacter.sh
 > PERSONA_TYPE=subjective  bash scripts/llm_generated.sh
 > PERSONA_TYPE=meta        bash scripts/llm_generated.sh
 > ```
-
-&nbsp;
-
-&nbsp;
-
-## Examples
-
-End-to-end scripts in [`examples/`](examples/):
-
-```bash
-# Custom persona or HuggingFace dataset (Nemotron, Twin-2K-500, LLM-Generated)
-python examples/quickstart_llm_persona.py                     # custom persona (no external deps)
-python examples/quickstart_llm_persona.py --source nemotron   # nvidia/Nemotron-Personas-USA
-python examples/quickstart_llm_persona.py --source twin       # LLM-Digital-Twin/Twin-2K-500
-python examples/quickstart_llm_persona.py --source llm_generated  # Tianyi-Lab/Personas
-python examples/quickstart_llm_persona.py --source custom --do_eval
-
-# OpenCharacter (vLLM + LoRA)
-python examples/test_opencharacter_vllm.py
-
-# HumanSimulacra (RAG agent)
-python examples/test_human_simulacra.py
-python examples/test_human_simulacra.py --character "Kevin Kelly" --model "gpt-5"
-
-# Character.AI (requires CAI_TOKEN)
-CAI_TOKEN=<your_token> python examples/test_characterai.py
-CAI_TOKEN=<your_token> python examples/test_characterai.py \
-    --character_name "Albert Einstein" --character_id <char_id>
-
-# ConsistentLLM (requires vLLM server running separately)
-# First: vllm serve <model_path> --port 8001
-python examples/test_consistent_llm.py \
-    --model_path anonymous/consistent_llm_llama-8b-sft-ppo-prompt \
-    --vllm_port 8001
-python examples/test_consistent_llm.py \
-    --model_path anonymous/consistent_llm_llama-8b-sft-ppo-prompt \
-    --vllm_port 8001 \
-    --personas_file picon/env/personas/consistent_llm_personas.jsonl
-```
 
 &nbsp;
 

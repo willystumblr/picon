@@ -70,7 +70,7 @@ def run(
     nhd_model: str = None,
     output_dir: str = None,
     question_seed: int = 42,
-    verbose: bool = False,
+    verbose: bool = True,
     **kwargs,
 ) -> PiconResult:
     """Run persona interview + evaluation in one call.

@@ -15,6 +15,8 @@ if [ -f ".env" ]; then
   set -a; source .env; set +a
 fi
 
+DATASET_DIR=${DATASET_DIR:-"$(dirname "$(realpath "$0")")/../picon/env/personas/deeppersona"}
+
 if [ -z "${DATASET_DIR}" ]; then
     echo "Error: DATASET_DIR is not set."
     echo "Usage: DATASET_DIR=/path/to/deeppersona bash scripts/deeppersona.sh"
@@ -44,13 +46,18 @@ import json, glob, os, random
 
 random.seed(${SEED})
 dataset_dir = "${DATASET_DIR}"
-files = sorted(glob.glob(os.path.join(dataset_dir, "*.json")))
+files = sorted(glob.glob(os.path.join(dataset_dir, "*.jsonl")))
 
 pairs = []
 for f in files:
-    data = json.load(open(f))
-    for key in data.keys():
-        pairs.append((f, key))
+    with open(f) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            key = obj.get("profile_id", str(len(pairs)))
+            pairs.append((f, key))
 
 sample_n = ${SAMPLE_N}
 if sample_n > 0:
@@ -79,8 +86,18 @@ while IFS=$'\t' read -r FILEPATH PROFILE_KEY; do
     python3 - <<EOF > "${TMPFILE}"
 import json
 from picon.env.interviewee_simulator.persona_prompt_builders import build_deeppersona_prompt
-data = json.load(open("${FILEPATH}"))
-profile = data.get("${PROFILE_KEY}", data)
+profile = None
+with open("${FILEPATH}") as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        obj = json.loads(line)
+        if obj.get("profile_id") == "${PROFILE_KEY}":
+            profile = obj
+            break
+if profile is None:
+    raise ValueError("Profile '${PROFILE_KEY}' not found in ${FILEPATH}")
 print(build_deeppersona_prompt(profile))
 EOF
 

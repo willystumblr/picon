@@ -92,7 +92,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LLM-Generated Persona wrapping server for PICON")
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash",
+    parser.add_argument("--model", type=str, default="gemini/gemini-3-flash-preview",
                         help="LLM model for generating responses")
     parser.add_argument("--persona_number", type=int, default=None,
                         help="persona_number field in Tianyi-Lab/Personas to load")

@@ -79,7 +79,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8002)
     parser.add_argument("--character_name", type=str, required=True)
-    parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash")
+    parser.add_argument("--model", type=str, default="gemini/gemini-3-flash-preview")
     args = parser.parse_args()
 
     character_name = args.character_name

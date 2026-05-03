@@ -10,7 +10,7 @@ from picon.components import (
     InterrogationSimulation,
 )
 
-__version__ = "0.1.3"
+__version__ = "0.1.6"
 __all__ = [
     # High-level API
     "run",

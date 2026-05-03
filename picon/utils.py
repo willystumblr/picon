@@ -19,7 +19,7 @@ for _noisy in ("LiteLLM", "httpx", "google", "urllib3"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI 
 except ImportError:
     OpenAI = None
 
@@ -306,7 +306,7 @@ def _process_gemini_file_batch(messages: List, model: str, display_name: str, ba
     return _wait_and_process_gemini_results(client, batch_job, inline=False)
 
 
-def _wait_and_process_openai_results(client: OpenAI, batch_job):
+def _wait_and_process_openai_results(client: Any | None, batch_job):
     """Wait for OpenAI batch completion and process results"""
     results = []
     while True:

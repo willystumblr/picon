@@ -1,7 +1,11 @@
 #!/bin/bash
 # Baseline: ConsistentLLM
 # Dataset: picon/env/personas/consistent_llm_personas.jsonl
-#   - each line: JSON with fields persona, name, counterpart_name, instruction, model_path
+#   - each line: JSON with fields persona, name, counterpart_name, instruction
+#   - generate with: python scripts/build_consistent_llm_personas.py \
+#       --personas_file <consistent-LLMs>/chatting/config_chatting_personas.json \
+#       --config_file   <consistent-LLMs>/chatting/config_chatting.json \
+#       --output_file   picon/env/personas/consistent_llm_personas.jsonl
 #
 # Requires: ConsistentLLM fine-tuned model served via vLLM
 #   vllm serve <model_path> --port 8001
@@ -33,6 +37,11 @@ wait_for_slot() {
 
 if [ ! -f "${PERSONAS_FILE}" ]; then
     echo "Personas file not found: ${PERSONAS_FILE}"
+    echo "Generate it first:"
+    echo "  python scripts/build_consistent_llm_personas.py \\"
+    echo "    --personas_file <consistent-LLMs>/chatting/config_chatting_personas.json \\"
+    echo "    --config_file   <consistent-LLMs>/chatting/config_chatting.json \\"
+    echo "    --output_file   ${PERSONAS_FILE}"
     exit 1
 fi
 

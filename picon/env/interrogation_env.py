@@ -353,8 +353,12 @@ class InterrogationEnv:
                     confirmation_question = res.choices[0].message.content.strip()
                     if "SKIP" not in confirmation_question:
                         logging.info(f"[CONFIRMATION QUESTION] {confirmation_question}")
+                        if self.verbose:
+                            print(f"[Confirmation Q] {confirmation_question}")
                         response = self.interviewee.get_response(confirmation_question)
                         logging.info(f"[RESPONSE] {self.interviewee.name}: {response.content}")
+                        if self.verbose:
+                            print(f"[{self.interviewee.name}] {response.content}\n")
                         observations.append(Observation(
                             observation_type="interviewee_response",
                             response=response

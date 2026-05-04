@@ -120,17 +120,13 @@ MEMORY_DIR = f"{BASE_DIR}/Characters/Memories"
 
 
 def get_context_limit(model: str, provider: str | None = None) -> int | None:
-    """
-    provider 예: "openai", "anthropic", "gemini", "bedrock", "azure"
-    provider가 None이면 자동 추론
-    """
     try:
         if provider:
             return get_max_tokens(model=model, custom_llm_provider=provider)
         return get_max_tokens(model=model)
     except Exception:
         return None
-
+    
 
 class Memory_agent:
     # The Memory agent is responsible for the following functions:

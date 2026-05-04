@@ -404,19 +404,16 @@ def upload_to_github(filepath, content):
         if not filepath.endswith('.json'):
             filepath += '.json'
         
-        # 파일이 이미 존재하는지 확인
         contents = None
         try:
             contents = repo.get_contents(filepath, ref="main")
         except Exception:
-            pass  # 파일이 없으면 예외 발생 → create_file로 진행
+            pass
 
         if contents is None:
-            # 파일이 없으면 새로 생성
             repo.create_file(filepath, "Add new interview result", content, branch="main")
             logging.info(f"File created successfully at {filepath}!")
         else:
-            # 파일이 있으면 업데이트(덮어쓰기)
             repo.update_file(filepath, "Update interview result", content, contents.sha, branch="main")
             logging.info(f"File updated successfully at {filepath}!")
     except Exception as e:
@@ -427,7 +424,6 @@ def download_from_github(filepath):
     g = Github(os.getenv("GITHUB_TOKEN"))
     repo = g.get_repo(os.getenv("GITHUB_REPO", "anonymous/real_human_interview"))
     try:
-        # .json 확장자 자동 추가
         if not filepath.endswith('.json'):
             filepath += '.json'
         contents = repo.get_contents(filepath, ref="main")

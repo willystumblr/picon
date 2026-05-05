@@ -420,21 +420,6 @@ picon/
 
 &nbsp;
 
-## Citation
-
-```bibtex
-@inproceedings{anonymous2026picon,
-  title     = {PICON: Persona Interrogation Framework for Consistency Evaluation},
-  author    = {Anonymous},
-  year      = {2026},
-  note      = {To be updated after acceptance.}
-}
-```
-
-&nbsp;
-
-&nbsp;
-
 ## How It Works
 
 ```
@@ -558,9 +543,6 @@ bash scripts/nemotron.sh
 # Control sample size and seed
 SAMPLE_N=10 SEED=42 bash scripts/twin_2k_500.sh
 
-# Run all personas (no sampling)
-SAMPLE_N=0 bash scripts/llm_generated.sh
-
 # Control parallelism
 MAX_PARALLEL=3 bash scripts/opencharacter.sh
 ```
@@ -601,3 +583,14 @@ MAX_PARALLEL=3 bash scripts/opencharacter.sh
 &nbsp;
 
 &nbsp;
+
+## Citation
+
+```bibtex
+@inproceedings{anonymous2026picon,
+  title     = {PICON: Persona Interrogation Framework for Consistency Evaluation},
+  author    = {Anonymous},
+  year      = {2026},
+  note      = {To be updated after acceptance.}
+}
+```

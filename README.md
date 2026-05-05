@@ -344,6 +344,10 @@ See [`examples/`](examples/) for full end-to-end scripts with vLLM + LoRA and Hu
 
 ## Reproducibility
 
+> **ML Code Completeness Note**
+> - *Training code*: N/A — PICON is an evaluation framework and does not involve model training.
+> - *Pre-trained models*: N/A — PICON calls external LLM APIs (OpenAI, Google, Anthropic) and does not ship model weights.
+
 To reproduce full benchmark results, run each agent's script after setting the required API keys in `.env`:
 
 ```bash
@@ -379,6 +383,57 @@ To run all personas without sampling, set `SAMPLE_N=0`:
 
 ```bash
 SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
+```
+
+&nbsp;
+
+&nbsp;
+
+## Repository Structure
+
+```
+picon/
+├── picon/                          # Core package
+│   ├── api.py                      # High-level API (run, interview, evaluate)
+│   ├── components.py               # User-facing classes (Interviewee, InterrogationSimulation, ...)
+│   ├── config.py                   # Default model configs and paths
+│   ├── schemas.py                  # Pydantic data models
+│   ├── agents/                     # LLM agent implementations
+│   │   ├── questioner_agent.py
+│   │   ├── extractor_agent.py
+│   │   ├── web_search_agent.py
+│   │   ├── evaluator.py
+│   │   └── prompts/                # System prompts for each agent
+│   ├── env/                        # Interview environment and simulators
+│   │   ├── interrogation_env.py    # Main simulation loop
+│   │   ├── interviewee_simulator/  # Persona agent wrappers
+│   │   └── personas/               # Persona data and licenses
+│   └── tools/                      # Web search and geocoding tools
+├── scripts/                        # One-command benchmark reproduction scripts
+│   ├── nemotron.sh
+│   ├── twin_2k_500.sh
+│   ├── human_simulacra.sh
+│   └── ...
+├── servers/                        # OpenAI-compatible wrapping servers per agent type
+├── figures/                        # Paper figures
+├── picon_tutorial.ipynb            # Hands-on tutorial notebook
+├── .env.example                    # API key template
+└── pyproject.toml                  # Package metadata and dependencies
+```
+
+&nbsp;
+
+&nbsp;
+
+## Citation
+
+```bibtex
+@inproceedings{anonymous2026picon,
+  title     = {PICON: Persona Interrogation Framework for Consistency Evaluation},
+  author    = {Anonymous},
+  year      = {2026},
+  note      = {To be updated after acceptance.}
+}
 ```
 
 &nbsp;

@@ -379,11 +379,6 @@ bash scripts/characterai.sh
 
 All scripts write results to `data/results/` and evaluation scores to `data/evaluation/`.
 By default, each script randomly samples 10 personas (`SAMPLE_N=10`, `SEED=42`).
-To run all personas without sampling, set `SAMPLE_N=0`:
-
-```bash
-SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
-```
 
 &nbsp;
 

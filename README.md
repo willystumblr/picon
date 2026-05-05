@@ -99,6 +99,36 @@ GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
 
 &nbsp;
 
+### Evaluate an LLM Persona (Simple API)
+
+For quick evaluations, use the `picon.run()` shortcut:
+
+```python
+import picon
+
+result = picon.run(
+    model="gpt-5",
+    persona="You are a 35-year-old software engineer living in San Francisco.",
+    name="John",
+    num_turns=20,
+    num_sessions=2,
+    do_eval=True,
+)
+
+print(result.eval_scores)
+result.save("results/john.json")
+```
+
+```bash
+# Equivalent CLI command
+picon --agent_model gpt-5 \
+      --agent_persona "You are a 35-year-old software engineer living in San Francisco." \
+      --agent_name "John" \
+      --num_turns 20 --num_sessions 2 --do_eval
+```
+
+&nbsp;
+
 ### Component-Based Usage
 
 Import individual components and compose your own simulation pipeline:
@@ -115,7 +145,7 @@ evaluator = Evaluator(model="gemini/gemini-2.5-flash")
 # Set up the persona to evaluate
 interviewee = Interviewee(
     model="gpt-5",
-    persona="You are a 35-year-old software engineer living in Seoul.",
+    persona="You are a 35-year-old software engineer living in San Francisco.",
     name="John",
 )
 
@@ -149,36 +179,6 @@ from picon import Interviewee, InterrogationSimulation
 
 interviewee = Interviewee(model="gpt-5", persona="You are ...", name="John")
 result = InterrogationSimulation(interviewee=interviewee, num_turns=20).run()
-```
-
-&nbsp;
-
-### Evaluate an LLM Persona (Simple API)
-
-For quick evaluations, use the `picon.run()` shortcut:
-
-```python
-import picon
-
-result = picon.run(
-    model="gpt-5",
-    persona="You are a 35-year-old software engineer living in Seoul.",
-    name="John",
-    num_turns=20,
-    num_sessions=2,
-    do_eval=True,
-)
-
-print(result.eval_scores)
-result.save("results/john.json")
-```
-
-```bash
-# Equivalent CLI command
-picon --agent_model gpt-5 \
-      --agent_persona "You are a 35-year-old software engineer living in Seoul." \
-      --agent_name "John" \
-      --num_turns 20 --num_sessions 2 --do_eval
 ```
 
 &nbsp;
@@ -238,8 +238,9 @@ interview_result = picon.run_interview(
     name="John",
     model="gpt-5",
     persona="You are a 35-year-old software engineer...",
-    num_turns=20,
+    num_turns=50,
     num_sessions=2,
+    verbose=True
 )
 
 # Step 2: Evaluate
@@ -432,6 +433,7 @@ SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
 > * `nhd_model` (str): Model for AI detection. Default: `"gpt-5-nano"`.
 > * `output_dir` (str): Output directory. Default: `"data/results"`.
 > * `question_seed` (int): Random seed for question selection. Default: `42`.
+> * `verbose` (bool): Print interview progress (questions and responses) to stdout. Default: `True`.
 
 &nbsp;
 
@@ -447,6 +449,7 @@ SAMPLE_N=0 SEED=42 bash scripts/nemotron.sh     # run all personas
 > * `num_sessions` (int): Number of repeated sessions. Default: `2`.
 > * `do_eval` (bool): Run evaluation after interview. Default: `True`.
 > * `eval_factors` (list): Evaluation factors to run: `"internal"`, `"external"`, `"intra"`, `"inter"`. Default: `None` (all).
+> * `verbose` (bool): Print interview progress (questions and responses) to stdout. Default: `True`.
 > * `questioner_model` (str): Model for the questioner agent. Default: `"gpt-5"`.
 > * `extractor_model` (str): Model for the entity extractor agent. Default: `"gpt-5.1"`.
 > * `web_search_model` (str): Model for the web search agent. Default: `"gpt-5"`.
@@ -488,7 +491,7 @@ Each script handles data loading, prompt construction, parallel execution, and e
 | **Human Simulacra** | 11 RAG-based characters (local) | `scripts/human_simulacra.sh` |
 | **OpenCharacter** | [`xywang1/OpenCharacter`](https://huggingface.co/datasets/xywang1/OpenCharacter) (HuggingFace) | `scripts/opencharacter.sh` |
 | **Character.AI** | `picon/env/personas/characterai.json` (10 characters) | `scripts/characterai.sh` |
-| **Nemotron** | `nvidia/Nemotron-Personas-*` — 7 regions (HuggingFace) | `scripts/nemotron.sh` |
+| **Nemotron** | `nvidia/Nemotron-Personas-*` — 7 regions: USA, Korea, Singapore, France, India, Japan, Brazil (HuggingFace) | `scripts/nemotron.sh` |
 | **DeepPersona** | Local JSON profile files | `scripts/deeppersona.sh` |
 | **Twin-2K-500** | [`LLM-Digital-Twin/Twin-2K-500`](https://huggingface.co/datasets/LLM-Digital-Twin/Twin-2K-500) (HuggingFace) | `scripts/twin_2k_500.sh` |
 | **LLM-Generated** | [`Tianyi-Lab/Personas`](https://huggingface.co/datasets/Tianyi-Lab/Personas) (HuggingFace) | `scripts/llm_generated.sh` |
@@ -546,20 +549,5 @@ MAX_PARALLEL=3 bash scripts/opencharacter.sh
 > ```
 
 &nbsp;
-
-&nbsp;
-
-## Citation
-
-If you use PICON in your research, please cite:
-
-```bibtex
-@article{anonymous2026picon,
-  title={PICON: A Multi-Turn Interrogation Framework for Evaluating Persona Agent Consistency},
-  author={Anonymous},
-  journal={arXiv preprint},
-  year={2026}
-}
-```
 
 &nbsp;

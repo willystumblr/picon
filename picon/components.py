@@ -11,7 +11,7 @@ Usage:
 
     interviewee = Interviewee(
         model="gpt-5",
-        persona="You are a 35-year-old software engineer living in Seoul.",
+        persona="You are a 35-year-old software engineer living in San Francisco.",
         name="John",
     )
 

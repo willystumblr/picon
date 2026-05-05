@@ -47,7 +47,7 @@ Extract **ONLY**:
     WORK_OF_ART : Titles of books, songs, etc
     LAW : Named documents made into laws
     LANGUAGE : Any named language
-    EMAIL : Institutional/custom domain email addresses ONLY (e.g., @kaist.ac.kr, @company.com). Do NOT extract emails from well-known personal providers (Gmail, Yahoo, Outlook, Hotmail, Naver[@naver.com is a personal provider], Daum, iCloud, etc.).
+    EMAIL : Institutional/custom domain email addresses ONLY (e.g., @company.com). Do NOT extract emails from well-known personal providers (Gmail, Yahoo, Outlook, Hotmail, Naver, Daum, iCloud, etc.).
     URL : Websites, IPs, Domains
     PHONE : Phone numbers
     ID_NUM : Patent numbers, serial numbers, form codes, license plates, official document IDs (e.g., "ISO 9001", "Form 1040", "Patent US123456").
@@ -147,16 +147,7 @@ If the extracted entity is a numeric or alphanumeric identifier or code (e.g., a
   *(This allows the verifier to search "Does Form 075 exist in immigration?")*
 
 ### Special Rule for EMAIL
-If the extracted entity is an institutional/custom domain email address:
-1. **Do not** claim the specific address exists (e.g., avoid "The email address 'user@kaist.ac.kr' is a real email address.").
-2. Instead, generate a claim about the **institution's email domain**.
-
-**Example:**
-* *Input:* "My email is minseokim23@kaist.ac.kr."
-  * *Entity:* "minseokim23@kaist.ac.kr"
-  * *Claim:* "KAIST uses the official email domain @kaist.ac.kr."
-
-**Do NOT extract** emails from well-known personal providers (Gmail, Yahoo, Outlook, Hotmail, Naver, Daum, iCloud, etc.) — they provide no publicly verifiable information.
+Do not claim the specific address exists. Instead, generate a claim about the **institution's email domain** (e.g., "[Institution] uses the official email domain @[domain]."). Do NOT extract emails from well-known personal providers.
 
 ---
 

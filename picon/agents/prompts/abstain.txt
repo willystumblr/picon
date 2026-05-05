@@ -28,7 +28,7 @@ Return JSON:
 }
 
 # Example
-Q: "Exact role title on SNUBH contract?"
+Q: "Exact role title on [ORGANIZATION] contract?"
 A: "My role is to develop a Real-Time Prediction and Early Intervention Model..."
 → This is a **misunderstanding**, not abstain.
 Output:
@@ -38,7 +38,7 @@ Output:
   "abstain_type": null
 }
 
-Q: "What is your position at SNUBH?"
+Q: "What is your position at [ORGANIZATION]?"
 A: "I’m not allowed to disclose that information."
 → True abstain.
 Output:

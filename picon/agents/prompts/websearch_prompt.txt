@@ -26,7 +26,7 @@ Generate tool calls for proper tools for each entity. When generating query, do 
 #### Examples
 
 * claims: ["Elon Musk is a real person"] → query: `Elon Musk the person`
-* claims: ["KAIST is a real university"] → query: `KAIST the university`
+* claims: ["University of Oxford is a real university"] → query: `University of Oxford the university`
 * claims: ["Seoul is a real location"] → query: `Seoul the place`
 * claims: ["Tesla is a real company"] → query: `Tesla the company`
 * claims: ["The entity 'Tesla' exists"] → query: `Tesla`
@@ -39,9 +39,9 @@ Generate tool calls for proper tools for each entity. When generating query, do 
 
 ### Additional Rule For Email Addresses
 
-* If the entity is an **institutional email address** (e.g., `user@kaist.ac.kr`), do NOT search for the full address — it is not publicly findable.
+* If the entity is an **institutional email address** (e.g., `user@company.com`), do NOT search for the full address — it is not publicly findable.
 * Instead, search for the **institution's email domain** using the claim text, e.g.:
-  * entity: `someuser@kaist.ac.kr`, claim: `"KAIST uses the official email domain @kaist.ac.kr."` → query: `KAIST official email domain`
+  * entity: `someuser@stanford.edu`, claim: `"Stanford University uses the official email domain @stanford.edu."` → query: `Stanford University official email domain`
 
 ---
 

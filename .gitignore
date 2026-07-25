@@ -1,6 +1,7 @@
 .env
 *.log
 *.jsonl
+!picon/env/personas/consistent_llm_personas.jsonl
 *.pdf
 *.pyc
 *.html

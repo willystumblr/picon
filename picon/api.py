@@ -35,7 +35,17 @@ from picon.agents.agent_factory import get_agent
 from picon.env.interrogation_env import InterrogationEnv
 from picon.tools.web_search import SerperSearch
 from picon.tools.address_locator import GoogleGeocodeValidate
-from picon.utils import write_json, read_json
+from picon.utils import write_json, read_json, setup_logging
+
+
+def _ensure_logging():
+    """Set up default console logging when the caller hasn't configured any.
+
+    CLI entry points call setup_logging() themselves; this covers library
+    usage (e.g. notebooks) where INFO logs would otherwise be silently dropped.
+    """
+    if not logging.getLogger().handlers:
+        setup_logging(log_to_file=False)
 
 
 @dataclass
@@ -80,6 +90,7 @@ def run(
       - LLM persona: provide model (and optionally persona, api_key)
     """
     load_dotenv()
+    _ensure_logging()
 
     if not model and not api_base:
         raise ValueError("Either 'model' or 'api_base' must be provided.")
@@ -265,6 +276,8 @@ def run_interview(
     Returns a dict with keys: persona_stats, result_path, results_complete,
     histories, env.  Pass the return value to run_evaluation() for scoring.
     """
+    _ensure_logging()
+
     if not model and not api_base:
         raise ValueError("Either 'model' or 'api_base' must be provided.")
 
@@ -481,6 +494,8 @@ def run_evaluation(interview_result: dict, eval_factors: List[str] = None) -> di
 
     Returns the updated persona_stats dict.
     """
+    _ensure_logging()
+
     if interview_result["env"] is None or interview_result["histories"] is None:
         return interview_result["persona_stats"]
 

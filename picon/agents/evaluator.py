@@ -496,6 +496,7 @@ class EvaluatorAgent(Agent):
         # Build evaluation items from history
         eval_items = []  # All QA items for uncooperative/internal checks
         external_eval_items = []  # Items for external consistency check (main QA + confirmation pairs)
+        searched_turns = set()  # T_c: turns with at least one entity-claim pair extracted and searched
         qa_history = "Previous Q&A:\n\n"  # For internal check (Q&A only, no tool outputs)
 
         for turn_idx, turn in enumerate(non_repeat_turns):
@@ -541,6 +542,11 @@ class EvaluatorAgent(Agent):
             agent_actions = turn.agent_action if hasattr(turn, 'agent_action') else None
 
             for i, tool_output in enumerate(tool_outputs):
+                # Coverage (T_c) counts the turn as soon as a claim was extracted and
+                # searched, regardless of whether a confirmation Q&A followed.
+                if self._extract_claims(tool_output, agent_actions, i):
+                    searched_turns.add(turn_idx)
+
                 # Check if there's a matching confirmation response
                 if i < len(confirmation_responses):
                     conf_obs = confirmation_responses[i]
@@ -773,9 +779,8 @@ class EvaluatorAgent(Agent):
             total_turns = len(non_repeat_turns)
 
             # T_c: turns that had at least one entity-claim pair extracted and searched
-            turns_with_claims = set()
-            for item in external_eval_items:
-                turns_with_claims.add(item['turn_idx'])
+            # (collected during history parsing, independent of confirmation/verification)
+            turns_with_claims = searched_turns
 
             # Build per-turn refuted/confirmed counts from fact verification results
             turn_confirmed_counts = {}  # turn_idx -> total confirmed claims

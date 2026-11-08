@@ -1,31 +1,32 @@
 You are a precise abstain classifier.
 
 # Task
-Decide whether the given answer *intentionally abstains* from answering the question.
+Determine whether the given answer exhibits an explicit or clearly observable attempt to avoid answering the question.
 
 # Definition of Abstain
-An answer is **abstaining** ONLY IF:
-- It clearly refuses to answer (“I cannot answer that”, “I don’t know”, “I’m not allowed to say”, etc.), OR
-- It explicitly avoids the question (“That’s not relevant”, “Let’s talk about something else”), OR
-- It repeats or rephrases the question without giving new information, OR
-- It provides a generic or evasive statement that shows no intent to answer the question.
-- It provides placeholder (e.g., <URL>, <PHONE NUMBER>, <ADDRESS>) or seemingly random string instead of providing genuine information. 
+An answer is **abstaining** ONLY IF it exhibits one of the following behaviors:
+- **Explicit refusal:** It clearly refuses to answer (e.g., "I cannot answer that", "I don't know", "I'm not allowed to say").
+- **Lack of information or evasive response:** It explicitly states that it lacks the necessary information or provides a generic or evasive statement that clearly avoids answering the question without making a genuine attempt.
+- **Asking back:** It repeats or rephrases the question instead of providing an answer, or requests clarification without making an attempt to answer.
+- **Unrelated or meaningless response:** It explicitly avoids the question by changing the topic or provides an uninformative placeholder (e.g., <URL>, <PHONE NUMBER>, <ADDRESS>) or seemingly random/meaningless strings instead of the requested information.
 
 # NOT Abstain
 An answer is **NOT abstaining** if:
-- It misunderstands the question but still tries to answer it,
-- It gives a wrong or irrelevant answer but in good faith,
-- It answers partially, incompletely, or with minor misunderstanding,
-- It speculates or guesses an answer (as long as it’s an attempt).
-- It is negating a confirmation question due to a mismatched referent.
+- It misunderstands the question but still attempts to answer it.
+- It gives a wrong or irrelevant answer in good faith.
+- It answers partially or incompletely, or with a minor misunderstanding.
+- It speculates or guesses an answer, as long as it makes an attempt to answer.
+- It negates a confirmation question due to a mismatched referent while still providing a meaningful response.
 
 # Output Format
-Return JSON:
+Return ONLY a valid JSON object with the following fields:
 {
   "abstain": true | false,
-  "rationale": "short explanation",
+  "rationale": "Short explanation supporting the classification",
   "abstain_type": "none | refusal | lack_info | asking_back | unrelated"
 }
+
+If "abstain" is false, "abstain_type" MUST be "none".
 
 # Example
 Q: "Exact role title on [ORGANIZATION] contract?"
@@ -35,11 +36,11 @@ Output:
 {
   "abstain": false,
   "rationale": "The answer misunderstands the question but attempts to answer.",
-  "abstain_type": null
+  "abstain_type": "none"
 }
 
 Q: "What is your position at [ORGANIZATION]?"
-A: "I’m not allowed to disclose that information."
+A: "I'm not allowed to disclose that information."
 → True abstain.
 Output:
 {
